@@ -12,13 +12,13 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # 复制 Python 依赖
-COPY python/requirements.txt .
+COPY backend/requirements.txt .
 
 # 安装 Python 依赖
 RUN pip install --no-cache-dir -r requirements.txt
 
 # 复制应用代码
-COPY python/server.py .
+COPY backend/server.py .
 
 # 创建模型目录
 RUN mkdir -p /root/.voice-transcription/models
