@@ -85,6 +85,21 @@ docker-up:
 docker-down:
 	docker-compose down
 
+# 打包安装包（macOS DMG）
+package-macos:
+	@echo "💿 打包 macOS DMG..."
+	./scripts/build_macos_dmg.sh $(VERSION)
+
+# 打包安装包（Windows Setup）
+package-windows:
+	@echo "💿 打包 Windows Setup..."
+	@echo "请在 Windows 环境下运行: .\scripts\build_windows_setup.bat $(VERSION)"
+
+# 打包所有平台
+package-all: package-macos
+	@echo "✅ macOS 打包完成"
+	@echo "⚠️ Windows 打包需要在 Windows 环境下运行"
+
 # 帮助
 help:
 	@echo "智能录音转写助手 - 构建脚本"
