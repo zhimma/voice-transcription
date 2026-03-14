@@ -1,0 +1,59 @@
+name: voice_transcription
+description: 智能录音转写助手 - Flutter 跨平台桌面应用
+
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  
+  # 状态管理
+  flutter_riverpod: ^2.4.9
+  
+  # 路由
+  go_router: ^13.0.1
+  
+  # 数据库
+  sqflite: ^2.3.0
+  sqflite_common_ffi: ^2.3.2
+  path: ^1.8.3
+  
+  # 网络请求
+  dio: ^5.4.0
+  
+  # 文件操作
+  path_provider: ^2.1.2
+  file_picker: ^6.1.1
+  
+  # 配置解析
+  yaml: ^3.1.2
+  json_annotation: ^4.8.1
+  
+  # UI组件
+  fluent_ui: ^4.8.6
+  window_manager: ^0.3.7
+  
+  # 其他
+  freezed_annotation: ^2.4.5
+  uuid: ^4.3.3
+  intl: ^0.18.1
+  
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.1
+  build_runner: ^2.4.8
+  json_serializable: ^6.7.1
+  freezed: ^2.4.6
+
+flutter:
+  uses-material-design: true
+  
+  assets:
+    - assets/config_template.json
+    - assets/config_template.yaml
