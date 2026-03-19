@@ -126,7 +126,7 @@ help:
 	@echo "  make build-with-python     - 构建并嵌入 Python 运行时"
 	@echo "  make build-all-with-python - 构建所有平台并嵌入 Python 运行时"
 	@echo "  make prepare-python-macos  - 下载并准备 macOS Python 运行时"
-	@echo "  make prepare-python-windows- 下载并准备 Windows Python 运行时"
+	@echo "  make prepare-python-windows - 下载并准备 Windows Python 运行时"
 	@echo "  make prepare-python-all    - 下载并准备所有平台 Python 运行时"
 
 # 同步 Python 服务到 Flutter assets

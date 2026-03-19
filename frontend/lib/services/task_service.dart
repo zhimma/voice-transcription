@@ -5,6 +5,7 @@ import '../services/database_service.dart';
 import '../ffi/native_service.dart';
 import '../services/config_service.dart';
 import 'logger_service.dart';
+import 'conversation_analysis_service.dart';
 
 class TaskService {
   final _db = DatabaseService.instance;
@@ -158,7 +159,14 @@ class TaskService {
         await _completeWorkflowStep(task, '摘要生成');
       }
 
-      // 4. 完成
+      // 4. 对话分析（如果启用）
+      if (task.enableConversationAnalysis) {
+        await _createWorkflowStep(task, '对话分析', WorkflowStatus.running);
+        await _executeConversationAnalysis(task);
+        await _completeWorkflowStep(task, '对话分析');
+      }
+
+      // 5. 完成
       await updateTaskStatus(task.id, TaskStatus.completed);
       await _completeWorkflowStep(task, '准备');
       await LoggerService.instance
@@ -286,7 +294,7 @@ class TaskService {
       );
 
       await _db.insertSummary(summary);
-      await updateTaskProgress(task.id, 100);
+      await updateTaskProgress(task.id, 95);
     } catch (e, st) {
       // 摘要失败不阻断流程
       await LoggerService.instance.warn(
@@ -296,6 +304,49 @@ class TaskService {
       );
       await LoggerService.instance.error(
         'Summary exception detail',
+        taskId: task.id,
+        error: e,
+        stackTrace: st,
+      );
+    }
+  }
+
+  /// 执行对话分析
+  Future<void> _executeConversationAnalysis(Task task) async {
+    try {
+      final transcription = await _db.getTranscription(task.id);
+      if (transcription == null) {
+        await LoggerService.instance.warn(
+          'No transcription found for conversation analysis',
+          taskId: task.id,
+        );
+        return;
+      }
+
+      final analysisService = ConversationAnalysisService();
+      final analysis = await analysisService.analyze(
+        transcription: transcription.fullText,
+        taskId: task.id,
+      );
+
+      // 保存分析结果
+      await _db.insertConversationAnalysis(analysis);
+
+      await updateTaskProgress(task.id, 100);
+      await LoggerService.instance.info(
+        'Conversation analysis completed',
+        taskId: task.id,
+        fields: {'conversation_type': analysis.info.type},
+      );
+    } catch (e, st) {
+      // 对话分析失败不阻断流程
+      await LoggerService.instance.warn(
+        'Conversation analysis failed, continue task',
+        taskId: task.id,
+        fields: {'error': e.toString()},
+      );
+      await LoggerService.instance.error(
+        'Conversation analysis exception detail',
         taskId: task.id,
         error: e,
         stackTrace: st,
