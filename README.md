@@ -63,13 +63,16 @@ cd frontend && flutter run -d macos
 ```
 ├── frontend/          # Flutter 前端
 ├── backend/           # Python 后端
-├── docs/             # 文档
-│   ├── DEPLOY.md     # 部署文档
-│   └── API.md        # API 文档
-├── scripts/          # 工具脚本
-├── .github/          # CI/CD 配置
+├── docs/              # 文档
+│   ├── PROJECT.md     # 项目总览
+│   ├── CHANGELOG.md   # 更新日志
+│   └── CODE_REVIEW.md # 代码审查
+├── scripts/           # 工具脚本
+├── .github/           # CI/CD 配置
 ├── docker-compose.yml
-└── PROJECT.md        # 项目总览
+├── Dockerfile
+├── Makefile           # 构建脚本
+└── README.md          # 本文件
 ```
 
 ---
@@ -82,6 +85,13 @@ make test
 
 # 构建当前平台
 make build
+
+# 构建并嵌入 Python 运行时（用户无 Python 时推荐）
+EMBED_PYTHON_DIR=/path/to/python make build-with-python
+
+# 自动下载并准备 Python 运行时（含依赖）
+make prepare-python-macos
+make prepare-python-windows
 
 # 构建所有平台
 make build-all
@@ -96,10 +106,10 @@ docker-compose up -d
 
 | 文档 | 说明 |
 |------|------|
-| [PROJECT.md](PROJECT.md) | 项目总览文档 |
-| [docs/DEPLOY.md](docs/DEPLOY.md) | 部署指南 |
-| [docs/API.md](docs/API.md) | API 接口文档 |
-| [CHANGELOG.md](CHANGELOG.md) | 更新日志 |
+| [docs/PROJECT.md](docs/PROJECT.md) | 项目总览文档 |
+| [docs/CHANGELOG.md](docs/CHANGELOG.md) | 更新日志 |
+| [docs/CODE_REVIEW.md](docs/CODE_REVIEW.md) | 代码审查报告 |
+| [CLAUDE.md](CLAUDE.md) | Claude Code 配置 |
 
 ---
 

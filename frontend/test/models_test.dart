@@ -9,23 +9,29 @@ void main() {
     test('Task creation', () {
       final task = Task(
         id: '1',
-        name: '测试任务',
-        audioPath: '/path/to/audio.mp3',
+        taskNo: 'TR20240101000000',
         status: TaskStatus.pending,
+        fileName: 'audio.mp3',
+        filePath: '/path/to/audio.mp3',
+        fileSize: 1024,
+        model: 'small',
         createdAt: DateTime.now(),
       );
       
       expect(task.id, '1');
-      expect(task.name, '测试任务');
+      expect(task.fileName, 'audio.mp3');
       expect(task.status, TaskStatus.pending);
     });
 
     test('Task status transitions', () {
       var task = Task(
         id: '1',
-        name: '测试',
-        audioPath: '/path/audio.mp3',
+        taskNo: 'TR20240101000001',
         status: TaskStatus.pending,
+        fileName: 'audio.mp3',
+        filePath: '/path/audio.mp3',
+        fileSize: 2048,
+        model: 'small',
         createdAt: DateTime.now(),
       );
       
@@ -40,15 +46,20 @@ void main() {
     test('Task toJson/fromJson', () {
       final task = Task(
         id: '1',
-        name: '测试任务',
-        audioPath: '/path/to/audio.mp3',
+        taskNo: 'TR20240101000002',
         status: TaskStatus.completed,
+        fileName: 'audio.mp3',
+        filePath: '/path/to/audio.mp3',
+        fileSize: 4096,
+        model: 'small',
         createdAt: DateTime(2024, 1, 1),
-        result: TranscriptionResult(
-          text: '转写结果',
+        transcription: TranscriptionResult(
+          id: 't1',
+          taskId: '1',
+          fullText: '转写结果',
           language: 'zh',
-          duration: 60.0,
-          segments: [],
+          segments: const [],
+          createdAt: DateTime(2024, 1, 1),
         ),
       );
       
@@ -56,32 +67,38 @@ void main() {
       final restored = Task.fromJson(json);
       
       expect(restored.id, task.id);
-      expect(restored.name, task.name);
+      expect(restored.fileName, task.fileName);
       expect(restored.status, task.status);
     });
   });
 
   group('Channel Model Tests', () {
     test('Channel creation', () {
-      final channel = Channel(
+      final channel = ChannelConfig(
         id: 'qwen',
         name: '通义千问',
-        type: ChannelType.cloud,
+        type: ChannelType.api,
+        provider: 'qwen',
         enabled: true,
+        priority: 1,
+        config: const {},
       );
       
       expect(channel.id, 'qwen');
       expect(channel.name, '通义千问');
-      expect(channel.type, ChannelType.cloud);
+      expect(channel.type, ChannelType.api);
       expect(channel.enabled, true);
     });
 
     test('Channel toggle', () {
-      var channel = Channel(
+      var channel = ChannelConfig(
         id: 'test',
         name: '测试',
         type: ChannelType.local,
+        provider: 'local',
         enabled: false,
+        priority: 1,
+        config: const {},
       );
       
       channel = channel.copyWith(enabled: true);

@@ -1,7 +1,7 @@
 # 智能录音转写助手 - 构建脚本
 # 支持: macOS, Windows, Linux
 
-.PHONY: all deps build build-all clean dev test help
+.PHONY: all deps build build-all clean dev test help sync-python embed-python embed-python-all build-with-python build-all-with-python prepare-python-macos prepare-python-windows prepare-python-all release-gate
 
 # 变量
 APP_NAME = voice_transcription
@@ -41,18 +41,24 @@ dev:
 	cd $(FRONTEND_DIR) && flutter run -d $(PLATFORM)
 
 # 构建当前平台
-build:
+build: sync-python
 	@echo "🔨 Building for $(PLATFORM)..."
 	cd $(FRONTEND_DIR) && flutter build $(PLATFORM) --release
 	@echo "✅ Build complete: $(FRONTEND_DIR)/build/$(PLATFORM)/"
 
 # 构建所有平台
-build-all:
+build-all: sync-python
 	@echo "🔨 Building for all platforms..."
 	cd $(FRONTEND_DIR) && flutter build macos --release
 	cd $(FRONTEND_DIR) && flutter build windows --release
 	cd $(FRONTEND_DIR) && flutter build linux --release
 	@echo "✅ All builds complete"
+
+# 构建当前平台并嵌入 Python 运行时
+build-with-python: build embed-python
+
+# 构建所有平台并嵌入 Python 运行时
+build-all-with-python: build-all embed-python-all
 
 # 运行测试
 test:
@@ -117,3 +123,37 @@ help:
 	@echo "  make docker-up     - 启动 Docker 服务"
 	@echo "  make docker-down   - 停止 Docker 服务"
 	@echo "  make help          - 显示帮助"
+	@echo "  make build-with-python     - 构建并嵌入 Python 运行时"
+	@echo "  make build-all-with-python - 构建所有平台并嵌入 Python 运行时"
+	@echo "  make prepare-python-macos  - 下载并准备 macOS Python 运行时"
+	@echo "  make prepare-python-windows- 下载并准备 Windows Python 运行时"
+	@echo "  make prepare-python-all    - 下载并准备所有平台 Python 运行时"
+
+# 同步 Python 服务到 Flutter assets
+sync-python:
+	@./scripts/sync_python_assets.sh
+
+# 嵌入 Python 运行时（需要设置 EMBED_PYTHON_DIR）
+embed-python:
+	@./scripts/embed_python_runtime.sh $(PLATFORM)
+
+# 嵌入 Python 运行时（所有平台）
+embed-python-all:
+	@./scripts/embed_python_runtime.sh macos
+	@./scripts/embed_python_runtime.sh windows
+	@./scripts/embed_python_runtime.sh linux
+
+# 下载并准备 Python 运行时（含依赖）
+prepare-python-macos:
+	@./scripts/prepare_python_runtime.sh macos aarch64-apple-darwin
+
+prepare-python-windows:
+	@./scripts/prepare_python_runtime.sh windows x86_64-pc-windows-msvc
+
+prepare-python-all:
+	@./scripts/prepare_python_runtime.sh macos aarch64-apple-darwin
+	@./scripts/prepare_python_runtime.sh windows x86_64-pc-windows-msvc
+	@./scripts/prepare_python_runtime.sh linux x86_64-unknown-linux-gnu
+
+release-gate:
+	@./scripts/release_gate.sh

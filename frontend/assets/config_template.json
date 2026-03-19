@@ -1,0 +1,24 @@
+{
+  "version": "1.0",
+  "transcription": {
+    "mode": "local",
+    "local": {
+      "model": "small",
+      "device": "auto"
+    },
+    "cloud_channels": []
+  },
+  "summary": {
+    "channels": [
+      {
+        "id": "local-summary",
+        "name": "本地简化版",
+        "type": "local",
+        "provider": "local",
+        "enabled": true,
+        "priority": 1,
+        "config": {}
+      }
+    ]
+  }
+}

@@ -58,3 +58,78 @@ htmlcov/
 # 系统文件
 .DS_Store
 Thumbs.db
+
+# Claude Code
+.claude/
+
+# Python 虚拟环境（更完整的匹配）
+.venv*/
+venv*/
+env/
+
+# 构建输出
+build_outputs/
+
+# Flutter 相关（根目录级别）
+frontend/.dart_tool/
+frontend/build/
+frontend/.flutter-plugins*
+frontend/.pub-cache/
+frontend/.pub/
+frontend/coverage/
+frontend/*.log
+
+# IDE
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+
+# macOS
+**/macos/Flutter/GeneratedPluginRegistrant.swift
+**/macos/Flutter/ephemeral
+
+# Windows
+**/windows/flutter/generated_plugin_registrant.cc
+**/windows/flutter/generated_plugins.cmake
+**/windows/flutter/ephemeral
+
+# Linux
+**/linux/flutter/generated_plugin_registrant.cc
+**/linux/flutter/generated_plugins.cmake
+**/linux/flutter/ephemeral
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# 模型文件
+models/
+*.bin
+*.pt
+*.pth
+
+# 配置和日志
+config.json
+.env
+logs/
+*.log
+
+# 测试
+.coverage
+htmlcov/
+.pytest_cache/
+
+# 第三方依赖构建产物
+third_party/**/build/
+third_party/**/dist/
+
+# 嵌入式 Python 运行时（通过脚本下载）
+third_party/python/
+
+# Dart 本地依赖（通过脚本下载）
+# third_party/dart/ 保留 sqlite3 因为 pubspec.yaml 依赖它

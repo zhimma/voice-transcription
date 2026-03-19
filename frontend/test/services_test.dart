@@ -1,9 +1,11 @@
 // 智能录音转写助手 - 服务层测试
 
 import 'package:flutter_test/flutter_test.dart';
-import '../lib/services/config_service.dart';
+import 'package:voice_transcription/services/config_service.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   group('ConfigService Tests', () {
     late ConfigService configService;
 
@@ -11,31 +13,74 @@ void main() {
       configService = ConfigService();
     });
 
-    test('Default config values', () {
-      final config = configService.defaultConfig;
-      
-      expect(config, isNotNull);
-      expect(config['transcription'], isNotNull);
-      expect(config['summary'], isNotNull);
+    test('Can parse minimal config', () async {
+      const jsonConfig = '''{
+  "transcription": {
+    "mode": "local",
+    "local": { "model": "small", "device": "auto" },
+    "cloud_channels": []
+  },
+  "summary": {
+    "channels": [
+      {
+        "id": "local-summary",
+        "name": "本地简化版",
+        "type": "local",
+        "provider": "local",
+        "enabled": true,
+        "priority": 1,
+        "config": {}
+      }
+    ]
+  }
+}''';
+      final config = await configService.importFromString(jsonConfig);
+      expect(config.transcription, isNotNull);
+      expect(config.summary, isNotNull);
     });
 
-    test('Config validation', () {
-      final validConfig = {
-        'transcription': {
-          'mode': 'local',
-          'local': {'model': 'small'},
-        },
-      };
-      
-      expect(configService.validateConfig(validConfig), true);
+    test('Config import/validate (JSON)', () async {
+      const jsonConfig = '''{
+  "version": "1.0",
+  "transcription": {
+    "mode": "local",
+    "local": { "model": "small", "device": "auto" },
+    "cloud_channels": []
+  },
+  "summary": {
+    "channels": [
+      {
+        "id": "local-summary",
+        "name": "本地简化版",
+        "type": "local",
+        "provider": "local",
+        "enabled": true,
+        "priority": 1,
+        "config": {}
+      }
+    ]
+  }
+}''';
+      final config = await configService.importFromString(jsonConfig);
+      await configService.validateConfig(config);
+      expect(config.transcription.mode, 'local');
     });
 
-    test('Invalid config detection', () {
-      final invalidConfig = {
-        'transcription': null,
-      };
-      
-      expect(configService.validateConfig(invalidConfig), false);
+    test('Config validation failure', () async {
+      const jsonConfig = '''{
+  "transcription": {
+    "mode": "cloud",
+    "local": { "model": "small", "device": "auto" },
+    "cloud_channels": []
+  },
+  "summary": {
+    "channels": []
+  }
+}''';
+      await expectLater(
+        () => configService.importFromString(jsonConfig),
+        throwsException,
+      );
     });
   });
 }

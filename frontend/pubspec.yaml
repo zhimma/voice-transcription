@@ -29,6 +29,10 @@ dependencies:
   # 文件操作
   path_provider: ^2.1.2
   file_picker: ^6.1.1
+  desktop_drop: ^0.4.4
+  just_audio: ^0.9.38
+  printing: ^5.12.0
+  pdf: ^3.10.8
   
   # 配置解析
   yaml: ^3.1.2
@@ -37,11 +41,12 @@ dependencies:
   # UI组件
   fluent_ui: ^4.8.6
   window_manager: ^0.3.7
+  tray_manager: ^0.2.1
   
   # 其他
-  freezed_annotation: ^2.4.5
+  freezed_annotation: ^2.4.4
   uuid: ^4.3.3
-  intl: ^0.18.1
+  intl: ^0.20.2
   
 dev_dependencies:
   flutter_test:
@@ -49,7 +54,11 @@ dev_dependencies:
   flutter_lints: ^3.0.1
   build_runner: ^2.4.8
   json_serializable: ^6.7.1
-  freezed: ^2.4.6
+  freezed: ^2.5.8
+
+dependency_overrides:
+  sqlite3:
+    path: ../third_party/dart/sqlite3
 
 flutter:
   uses-material-design: true
@@ -57,3 +66,6 @@ flutter:
   assets:
     - assets/config_template.json
     - assets/config_template.yaml
+    - assets/python/server.py
+    - assets/python/requirements.txt
+    - assets/tray.png

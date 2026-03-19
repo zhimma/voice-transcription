@@ -1,8 +1,10 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:dio/dio.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:yaml/yaml.dart';
 import '../models/channel.dart';
+import 'logger_service.dart';
 
 class ConfigService {
   static const String _configFileName = 'config.json';
@@ -51,6 +53,19 @@ class ConfigService {
     final content = jsonEncode(config.toJson());
     await file.writeAsString(content);
     _cachedConfig = config;
+    await LoggerService.instance.setConfig(config.logging);
+  }
+
+  Future<AppConfig> addRecentFile(String filePath, {int maxItems = 10}) async {
+    final current = await loadConfig();
+    final updated = [
+      filePath,
+      ...current.recentFiles.where((f) => f != filePath),
+    ];
+    final trimmed = updated.take(maxItems).toList();
+    final newConfig = current.copyWith(recentFiles: trimmed);
+    await saveConfig(newConfig);
+    return newConfig;
   }
 
   // 从字符串导入配置（支持 JSON/YAML）
@@ -121,15 +136,80 @@ class ConfigService {
 
   // 测试渠道连接
   Future<bool> testChannel(ChannelConfig channel) async {
-    // TODO: 实现渠道连接测试
-    return true;
+    final result = await testChannelDetailed(channel);
+    return result.ok;
+  }
+
+  Future<ChannelTestResult> testChannelDetailed(ChannelConfig channel) async {
+    final apiKey = channel.config['api_key']?.toString().trim() ?? '';
+    final apiUrl = channel.config['api_url']?.toString().trim() ?? '';
+    if (apiKey.isEmpty || apiUrl.isEmpty) {
+      return const ChannelTestResult(
+        ok: false,
+        message: '请填写 API Key 和 API URL',
+        field: 'api_key/api_url',
+      );
+    }
+
+    final dio = Dio(
+      BaseOptions(
+        connectTimeout: const Duration(seconds: 8),
+        receiveTimeout: const Duration(seconds: 12),
+        sendTimeout: const Duration(seconds: 8),
+      ),
+    );
+
+    try {
+      if (channel.provider == 'qwen') {
+        // 连通性测试固定用文本模型，避免音频专用模型因输入类型不匹配而误报失败。
+        const model = 'qwen3.5-plus';
+        final response = await dio.post(
+          '${apiUrl.replaceAll(RegExp(r"/+$"), "")}/chat/completions',
+          data: {
+            'model': model,
+            'messages': [
+              {
+                'role': 'user',
+                'content': 'ping',
+              }
+            ],
+            'max_tokens': 1,
+          },
+          options: Options(
+            headers: {
+              'Authorization': 'Bearer $apiKey',
+              'Content-Type': 'application/json',
+            },
+          ),
+        );
+        final ok = response.statusCode != null && response.statusCode! < 300;
+        return ChannelTestResult(
+          ok: ok,
+          message: ok ? '连接成功' : '连接失败: HTTP ${response.statusCode}',
+        );
+      }
+      return const ChannelTestResult(
+        ok: false,
+        message: '当前仅支持 Qwen 渠道测试',
+        field: 'provider',
+      );
+    } on DioException catch (e) {
+      return ChannelTestResult(
+        ok: false,
+        message: '连接失败: ${e.message ?? '网络错误'}',
+      );
+    } catch (e) {
+      return ChannelTestResult(
+        ok: false,
+        message: '连接失败: $e',
+      );
+    }
   }
 
   // 获取启用的语音识别渠道（按优先级排序）
   List<ChannelConfig> getEnabledTranscriptionChannels(AppConfig config) {
-    final channels = config.transcription.cloudChannels
-        .where((c) => c.enabled)
-        .toList();
+    final channels =
+        config.transcription.cloudChannels.where((c) => c.enabled).toList();
     channels.sort((a, b) => a.priority.compareTo(b.priority));
     return channels;
   }
@@ -147,8 +227,9 @@ class ConfigService {
       transcription: TranscriptionConfig(
         mode: 'local',
         local: LocalTranscriptionConfig(
-          model: 'small',
+          model: 'base',
           device: 'auto',
+          modelSource: 'modelscope',
         ),
         cloudChannels: [],
       ),
@@ -164,6 +245,12 @@ class ConfigService {
             config: {},
           ),
         ],
+      ),
+      recentFiles: [],
+      logging: LoggingConfig(
+        level: 'DEBUG',
+        maxFileMb: 20,
+        retentionDays: 7,
       ),
     );
   }
@@ -214,4 +301,16 @@ class ConfigService {
       ),
     );
   }
+}
+
+class ChannelTestResult {
+  final bool ok;
+  final String message;
+  final String? field;
+
+  const ChannelTestResult({
+    required this.ok,
+    required this.message,
+    this.field,
+  });
 }

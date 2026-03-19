@@ -7,6 +7,12 @@
 #define MyAppPublisher "Hulumibao"
 #define MyAppURL "https://gitlab.hulumibao.com/voice-transcription/frontend"
 #define MyAppExeName "voice_transcription.exe"
+#ifndef WITH_EMBEDDED_PYTHON
+  #define WITH_EMBEDDED_PYTHON "1"
+#endif
+#ifndef WITH_VCREDIST_BOOTSTRAP
+  #define WITH_VCREDIST_BOOTSTRAP "1"
+#endif
 
 [Setup]
 ; 应用信息
@@ -61,8 +67,15 @@ Name: "quicklaunchicon"; Description: "{cm:CreateQuickLaunchIcon}"; GroupDescrip
 ; Flutter 应用文件
 Source: "..\frontend\build\windows\x64\Release\bundle\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
-; Python 后端
-Source: "..\backend\*"; DestDir: "{app}\python"; Flags: ignoreversion recursesubdirs createallsubdirs
+#if WITH_EMBEDDED_PYTHON == "1"
+; 内置 Python 运行时（由 embed_python_runtime.sh 写入 bundle/python）
+Source: "..\frontend\build\windows\x64\Release\bundle\python\*"; DestDir: "{app}\python"; Flags: ignoreversion recursesubdirs createallsubdirs
+#endif
+
+#if WITH_VCREDIST_BOOTSTRAP == "1"
+; 可选：VC++ 运行时离线包（若文件存在）
+Source: "..\third_party\windows\vcredist_x64.exe"; DestDir: "{tmp}"; Flags: ignoreversion skipifsourcedoesntexist
+#endif
 
 ; 图标文件
 Source: "..\assets\app_icon.ico"; DestDir: "{app}"; Flags: ignoreversion
@@ -81,6 +94,9 @@ Name: "{userappdata}\Microsoft\Internet Explorer\Quick Launch\{#MyAppName}"; Fil
 [Run]
 ; 安装完成后可选启动
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#MyAppName}}"; Flags: nowait postinstall skipifsilent
+#if WITH_VCREDIST_BOOTSTRAP == "1"
+Filename: "{tmp}\vcredist_x64.exe"; Parameters: "/install /quiet /norestart"; StatusMsg: "Installing Microsoft Visual C++ Runtime..."; Flags: skipifdoesntexist runhidden
+#endif
 
 [UninstallDelete]
 ; 卸载时删除的文件和目录

@@ -115,6 +115,15 @@ class ConfigNotifier extends StateNotifier<AsyncValue<AppConfig>> {
       return '导入失败: $e';
     }
   }
+
+  Future<void> addRecentFile(String filePath) async {
+    try {
+      final updated = await _service.addRecentFile(filePath);
+      state = AsyncValue.data(updated);
+    } catch (e, st) {
+      state = AsyncValue.error(e, st);
+    }
+  }
   
   /// 导出配置
   String exportToString({bool hideSecrets = false}) {
