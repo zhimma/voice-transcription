@@ -4,6 +4,7 @@ import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import 'package:path_provider/path_provider.dart';
 import '../models/task.dart';
+import '../models/conversation_analysis.dart';
 
 class DatabaseService {
   static Database? _db;
@@ -23,7 +24,7 @@ class DatabaseService {
 
     return await openDatabase(
       dbPath,
-      version: 3,
+      version: 4,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -104,6 +105,17 @@ class DatabaseService {
       )
     ''');
 
+    // 对话分析结果表
+    await db.execute('''
+      CREATE TABLE conversation_analyses (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        analysis_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+      )
+    ''');
+
     // 索引
     await db.execute('CREATE INDEX idx_tasks_status ON tasks(status)');
     await db.execute('CREATE INDEX idx_tasks_created_at ON tasks(created_at)');
@@ -111,6 +123,8 @@ class DatabaseService {
         'CREATE INDEX idx_transcriptions_task_id ON transcriptions(task_id)');
     await db
         .execute('CREATE INDEX idx_summaries_task_id ON summaries(task_id)');
+    await db.execute(
+        'CREATE INDEX idx_conversation_analyses_task_id ON conversation_analyses(task_id)');
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
@@ -136,6 +150,27 @@ class DatabaseService {
         await db.execute('ALTER TABLE tasks ADD COLUMN provider TEXT');
       } catch (_) {}
     }
+    if (oldVersion < 4) {
+      try {
+        await db.execute(
+            'ALTER TABLE tasks ADD COLUMN enable_conversation_analysis INTEGER DEFAULT 0');
+      } catch (_) {}
+      try {
+        await db.execute('''
+          CREATE TABLE conversation_analyses (
+            id TEXT PRIMARY KEY,
+            task_id TEXT NOT NULL,
+            analysis_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+          )
+        ''');
+      } catch (_) {}
+      try {
+        await db.execute(
+            'CREATE INDEX idx_conversation_analyses_task_id ON conversation_analyses(task_id)');
+      } catch (_) {}
+    }
   }
 
   // 任务 CRUD
@@ -159,6 +194,7 @@ class DatabaseService {
     return task.copyWith(
       transcription: await getTranscription(id),
       summary: await getSummary(id),
+      conversationAnalysis: await getConversationAnalysis(id),
       steps: await getWorkflowSteps(id),
     );
   }
@@ -354,6 +390,7 @@ class DatabaseService {
       'enable_speaker': task.enableSpeaker ? 1 : 0,
       'generate_summary': task.generateSummary ? 1 : 0,
       'summary_length': task.summaryLength,
+      'enable_conversation_analysis': task.enableConversationAnalysis ? 1 : 0,
       'created_at': task.createdAt.toIso8601String(),
       'started_at': task.startedAt?.toIso8601String(),
       'completed_at': task.completedAt?.toIso8601String(),
@@ -379,6 +416,7 @@ class DatabaseService {
       enableSpeaker: map['enable_speaker'] == 1,
       generateSummary: map['generate_summary'] == 1,
       summaryLength: map['summary_length'],
+      enableConversationAnalysis: map['enable_conversation_analysis'] == 1,
       createdAt: DateTime.parse(map['created_at']),
       startedAt:
           map['started_at'] != null ? DateTime.parse(map['started_at']) : null,
@@ -471,6 +509,30 @@ class DatabaseService {
       error: map['error'],
       logs: map['logs']?.toString().split('\n') ?? [],
     );
+  }
+
+  // 对话分析结果
+  Future<void> insertConversationAnalysis(ConversationAnalysis analysis) async {
+    final db = await database;
+    await db.insert('conversation_analyses', {
+      'id': analysis.id,
+      'task_id': analysis.taskId,
+      'analysis_json': jsonEncode(analysis.toJson()),
+      'created_at': analysis.createdAt.toIso8601String(),
+    });
+  }
+
+  Future<ConversationAnalysis?> getConversationAnalysis(String taskId) async {
+    final db = await database;
+    final maps = await db.query(
+      'conversation_analyses',
+      where: 'task_id = ?',
+      whereArgs: [taskId],
+    );
+
+    if (maps.isEmpty) return null;
+    final json = jsonDecode(maps.first['analysis_json'] as String);
+    return ConversationAnalysis.fromJson(Map<String, dynamic>.from(json as Map));
   }
 
   Future<void> close() async {

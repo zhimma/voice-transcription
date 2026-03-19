@@ -13,6 +13,7 @@ import 'ffi/native_service.dart';
 import 'services/config_service.dart';
 import 'services/app_router.dart';
 import 'services/logger_service.dart';
+import 'services/hotkey_service.dart';
 import 'providers/task_provider.dart';
 import 'providers/config_provider.dart';
 
@@ -50,7 +51,7 @@ void main() async {
   await LoggerService.instance.info('App starting');
 
   await _setupTray();
-  // hotkey_manager removed for build stability
+  await HotkeyService.instance.initialize();
 
   runApp(
     ProviderScope(
@@ -136,6 +137,7 @@ class _AppWindowListener extends WindowListener {
     _closing = true;
     try {
       await LoggerService.instance.info('App closing, cleanup python process');
+      await HotkeyService.instance.dispose();
       await NativeService.dispose();
     } finally {
       await windowManager.destroy();

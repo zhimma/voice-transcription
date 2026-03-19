@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:file_picker/file_picker.dart';
@@ -135,6 +136,8 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
                 _LocalDownloadSourceCard(config: config),
                 const SizedBox(height: 12),
                 _LocalModelList(),
+                const SizedBox(height: 48),
+                _KeyboardShortcutsSection(),
               ],
             ],
           );
@@ -1472,6 +1475,78 @@ class _MetaPill extends StatelessWidget {
           color: Color(0xFF475569),
         ),
       ),
+    );
+  }
+}
+
+class _KeyboardShortcutsSection extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final shortcuts = [
+      ('最小化窗口', Platform.isMacOS ? '⌘M' : 'Ctrl+M'),
+      ('新建任务', Platform.isMacOS ? '⌘N' : 'Ctrl+N'),
+      ('打开设置', Platform.isMacOS ? '⌘,' : 'Ctrl+,'),
+      ('聚焦窗口', Platform.isMacOS ? '⌘L' : 'Ctrl+L'),
+      ('显示/隐藏', Platform.isMacOS ? '⌘⇧H' : 'Ctrl+Shift+H'),
+    ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const _SectionHeader(
+          title: '键盘快捷键',
+          subtitle: '全局快捷键可在任何界面使用。',
+        ),
+        const SizedBox(height: 20),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: const Color(0xFFE2E8F0)),
+          ),
+          child: Column(
+            children: shortcuts.map((item) {
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        item.$1,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF1F5F9),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                      ),
+                      child: Text(
+                        item.$2,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          fontFamily: 'monospace',
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }).toList(),
+          ),
+        ),
+      ],
     );
   }
 }

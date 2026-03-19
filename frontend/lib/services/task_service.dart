@@ -21,6 +21,7 @@ class TaskService {
     String language = 'auto',
     bool generateSummary = true,
     String summaryLength = 'medium',
+    bool enableConversationAnalysis = false,
   }) async {
     final task = Task(
       id: _uuid.v4(),
@@ -34,6 +35,7 @@ class TaskService {
       provider: provider,
       generateSummary: generateSummary,
       summaryLength: summaryLength,
+      enableConversationAnalysis: enableConversationAnalysis,
       createdAt: DateTime.now(),
     );
 

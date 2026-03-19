@@ -38,10 +38,11 @@ dependencies:
   yaml: ^3.1.2
   json_annotation: ^4.8.1
   
-  # UI组件
-  fluent_ui: ^4.8.6
+  # 桌面功能
   window_manager: ^0.3.7
   tray_manager: ^0.2.1
+  hotkey_manager: ^0.2.3
+  screen_retriever: ^0.1.9
   
   # 其他
   freezed_annotation: ^2.4.4

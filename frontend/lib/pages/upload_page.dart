@@ -24,6 +24,7 @@ class _UploadPageState extends ConsumerState<UploadPage> {
   String? _hint;
   String _language = 'auto';
   String _quality = 'balanced';
+  bool _enableConversationAnalysis = false;
   String? _error;
   bool _dragging = false;
   bool _submitting = false;
@@ -134,6 +135,7 @@ class _UploadPageState extends ConsumerState<UploadPage> {
             language: _language,
             generateSummary: true,
             summaryLength: 'medium',
+            enableConversationAnalysis: _enableConversationAnalysis,
           );
 
       await ref.read(configProvider.notifier).addRecentFile(_filePath!);
@@ -175,8 +177,10 @@ class _UploadPageState extends ConsumerState<UploadPage> {
         onDrop: (path) async => _setFile(path),
         language: _language,
         quality: _quality,
+        enableConversationAnalysis: _enableConversationAnalysis,
         onLanguageChanged: (value) => setState(() => _language = value),
         onQualityChanged: (value) => setState(() => _quality = value),
+        onAnalysisChanged: (value) => setState(() => _enableConversationAnalysis = value),
       ),
     );
     if (widget.embedded) return content;
@@ -316,8 +320,10 @@ class _NewTaskCard extends StatelessWidget {
   final ValueChanged<String> onDrop;
   final String language;
   final String quality;
+  final bool enableConversationAnalysis;
   final ValueChanged<String> onLanguageChanged;
   final ValueChanged<String> onQualityChanged;
+  final ValueChanged<bool> onAnalysisChanged;
 
   const _NewTaskCard({
     required this.dragging,
@@ -332,8 +338,10 @@ class _NewTaskCard extends StatelessWidget {
     required this.onDrop,
     required this.language,
     required this.quality,
+    required this.enableConversationAnalysis,
     required this.onLanguageChanged,
     required this.onQualityChanged,
+    required this.onAnalysisChanged,
   });
 
   @override
@@ -419,8 +427,10 @@ class _CompactBody extends StatelessWidget {
   final ValueChanged<String> onDrop;
   final String language;
   final String quality;
+  final bool enableConversationAnalysis;
   final ValueChanged<String> onLanguageChanged;
   final ValueChanged<String> onQualityChanged;
+  final ValueChanged<bool> onAnalysisChanged;
 
   const _CompactBody({
     required this.dragging,
@@ -433,8 +443,10 @@ class _CompactBody extends StatelessWidget {
     required this.onDrop,
     required this.language,
     required this.quality,
+    required this.enableConversationAnalysis,
     required this.onLanguageChanged,
     required this.onQualityChanged,
+    required this.onAnalysisChanged,
   });
 
   @override
@@ -492,6 +504,11 @@ class _CompactBody extends StatelessWidget {
                 _RightSettings(
                   quality: quality,
                   onQualityChanged: onQualityChanged,
+                ),
+                const SizedBox(height: 12),
+                _AnalysisToggle(
+                  enabled: enableConversationAnalysis,
+                  onChanged: onAnalysisChanged,
                 ),
               ],
             ),

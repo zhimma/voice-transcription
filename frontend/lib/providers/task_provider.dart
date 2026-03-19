@@ -52,6 +52,7 @@ class TaskListNotifier extends StateNotifier<AsyncValue<List<Task>>> {
     String language = 'auto',
     bool generateSummary = true,
     String summaryLength = 'medium',
+    bool enableConversationAnalysis = false,
   }) async {
     final task = await _service.createTask(
       fileName: fileName,
@@ -62,6 +63,7 @@ class TaskListNotifier extends StateNotifier<AsyncValue<List<Task>>> {
       language: language,
       generateSummary: generateSummary,
       summaryLength: summaryLength,
+      enableConversationAnalysis: enableConversationAnalysis,
     );
 
     // 刷新列表
