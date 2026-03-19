@@ -1,0 +1,36 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="180" y1="140" x2="844" y2="884" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0F172A"/>
+      <stop offset="1" stop-color="#111827"/>
+    </linearGradient>
+    <linearGradient id="mark" x1="352" y1="306" x2="694" y2="716" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#DDE7FF"/>
+    </linearGradient>
+    <filter id="shadow" x="136" y="136" width="752" height="752" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feFlood flood-opacity="0" result="BackgroundImageFix"/>
+      <feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
+      <feOffset dy="28"/>
+      <feGaussianBlur stdDeviation="32"/>
+      <feColorMatrix type="matrix" values="0 0 0 0 0.02 0 0 0 0 0.04 0 0 0 0 0.12 0 0 0 0.28 0"/>
+      <feBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow_1_1"/>
+      <feBlend mode="normal" in="SourceGraphic" in2="effect1_dropShadow_1_1" result="shape"/>
+    </filter>
+  </defs>
+
+  <rect width="1024" height="1024" rx="224" fill="#F8FAFC"/>
+
+  <g filter="url(#shadow)">
+    <rect x="200" y="200" width="624" height="624" rx="176" fill="url(#bg)"/>
+    <rect x="200.5" y="200.5" width="623" height="623" rx="175.5" stroke="white" stroke-opacity="0.08"/>
+
+    <path d="M512 334C572.751 334 622 383.249 622 444V560C622 620.751 572.751 670 512 670C451.249 670 402 620.751 402 560V444C402 383.249 451.249 334 512 334Z" stroke="url(#mark)" stroke-width="42"/>
+    <path d="M342 546C342 640.992 419.008 718 514 718C608.992 718 686 640.992 686 546" stroke="url(#mark)" stroke-width="42" stroke-linecap="round"/>
+    <path d="M514 718V774" stroke="url(#mark)" stroke-width="42" stroke-linecap="round"/>
+    <path d="M432 774H596" stroke="url(#mark)" stroke-width="42" stroke-linecap="round"/>
+
+    <path d="M662 416C694.058 445.388 714 487.611 714 534C714 580.389 694.058 622.612 662 652" stroke="url(#mark)" stroke-opacity="0.78" stroke-width="24" stroke-linecap="round"/>
+    <path d="M362 416C329.942 445.388 310 487.611 310 534C310 580.389 329.942 622.612 362 652" stroke="url(#mark)" stroke-opacity="0.78" stroke-width="24" stroke-linecap="round"/>
+  </g>
+</svg>

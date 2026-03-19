@@ -24,8 +24,10 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // 初始化桌面端 SQLite
-  sqfliteFfiInit();
-  databaseFactory = databaseFactoryFfi;
+  if (databaseFactoryOrNull == null) {
+    sqfliteFfiInit();
+    databaseFactory = databaseFactoryFfi;
+  }
 
   // 初始化窗口管理
   await windowManager.ensureInitialized();

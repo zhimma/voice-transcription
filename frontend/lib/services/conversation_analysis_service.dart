@@ -8,7 +8,7 @@ import 'logger_service.dart';
 /// 客服对话分析服务
 /// 调用大模型对客服-客户对话进行深度分析
 class ConversationAnalysisService {
-  static const String _analysisPrompt =
+  static const String _defaultPromptTemplate =
       '你是一个专业的客服对话分析专家。请对以下客服-客户对话进行深度分析，并以JSON格式返回分析结果。\n\n'
       '对话内容：\n'
       '```\n'
@@ -144,8 +144,11 @@ class ConversationAnalysisService {
       final config = await ConfigService().loadConfig();
       final providerConfig = _resolveAnalysisProviderConfig(config);
 
-      // 准备提示词
-      final prompt = _analysisPrompt.replaceAll(
+      // 准备提示词（使用配置的提示词或默认提示词）
+      final promptTemplate = config.prompts.conversationAnalysis.isNotEmpty
+          ? config.prompts.conversationAnalysis
+          : _defaultPromptTemplate;
+      final prompt = promptTemplate.replaceAll(
         '{transcription}',
         transcription,
       );

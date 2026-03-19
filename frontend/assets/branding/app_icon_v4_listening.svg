@@ -1,0 +1,52 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="164" y1="148" x2="860" y2="880" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2D6BFF"/>
+      <stop offset="0.52" stop-color="#4F7CFF"/>
+      <stop offset="1" stop-color="#8B5CF6"/>
+    </linearGradient>
+    <linearGradient id="line" x1="386" y1="286" x2="666" y2="742" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#EEF4FF"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1024" height="1024" rx="224" fill="#F3F7FF"/>
+  <rect x="176" y="176" width="672" height="672" rx="184" fill="url(#bg)"/>
+
+  <path
+    d="M566 320C489.232 320 426 382.58 426 460V544C426 610.274 468.787 666.825 532.274 687.304C553.789 694.244 568 714.501 568 737.108V752"
+    stroke="url(#line)"
+    stroke-width="44"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+
+  <path
+    d="M558 404C514.56 404 480 438.56 480 482V536C480 570.242 501.976 600.943 534 611.726"
+    stroke="url(#line)"
+    stroke-width="28"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    opacity="0.92"
+  />
+
+  <path
+    d="M646 430C680.62 460.512 702 505.218 702 555C702 604.782 680.62 649.488 646 680"
+    stroke="url(#line)"
+    stroke-width="24"
+    stroke-linecap="round"
+    opacity="0.92"
+  />
+
+  <path
+    d="M606 472C628.97 492.563 643 522.451 643 555C643 587.549 628.97 617.437 606 638"
+    stroke="url(#line)"
+    stroke-width="18"
+    stroke-linecap="round"
+    opacity="0.7"
+  />
+
+  <circle cx="728" cy="292" r="20" fill="#A7F3D0"/>
+  <circle cx="300" cy="738" r="16" fill="#FDE68A"/>
+</svg>

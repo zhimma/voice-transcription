@@ -3,6 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../providers/task_provider.dart';
 
+// 侧边栏折叠状态
+final sidebarCollapsedProvider = StateProvider<bool>((ref) => false);
+
 enum AppNavItem { tasks, newTask, models, logs, settings }
 
 class AppShell extends StatelessWidget {
@@ -27,7 +30,7 @@ class AppShell extends StatelessWidget {
       backgroundColor: Theme.of(context).colorScheme.background,
       body: Row(
         children: [
-          _Sidebar(active: active),
+          const _Sidebar(),
           Expanded(
             child: Column(
               children: [
@@ -48,14 +51,18 @@ class AppShell extends StatelessWidget {
   }
 }
 
-class _Sidebar extends StatelessWidget {
-  final AppNavItem active;
-  const _Sidebar({required this.active});
+class _Sidebar extends ConsumerWidget {
+  const _Sidebar();
 
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 240,
+  Widget build(BuildContext context, WidgetRef ref) {
+    final isCollapsed = ref.watch(sidebarCollapsedProvider);
+    final active = ref.watch(_activeNavItemProvider);
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.easeInOut,
+      width: isCollapsed ? 64 : 240,
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surface,
         border: Border(
@@ -65,33 +72,53 @@ class _Sidebar extends StatelessWidget {
       child: Column(
         children: [
           const SizedBox(height: 24),
-          _BrandHeader(),
+          isCollapsed ? const _CompactBrandHeader() : const _BrandHeader(),
           const SizedBox(height: 12),
           _NavItem(
             icon: Icons.list_alt,
             label: '任务管理',
             selected: active == AppNavItem.tasks,
-            onTap: () => context.go('/'),
+            isCollapsed: isCollapsed,
+            onTap: () {
+              ref.read(_activeNavItemProvider.notifier).state = AppNavItem.tasks;
+              context.go('/');
+            },
           ),
           _NavItem(
             icon: Icons.add_circle,
             label: '新建任务',
             selected: active == AppNavItem.newTask,
-            onTap: () => context.go('/upload'),
+            isCollapsed: isCollapsed,
+            onTap: () {
+              ref.read(_activeNavItemProvider.notifier).state = AppNavItem.newTask;
+              context.go('/upload');
+            },
           ),
           _NavItem(
             icon: Icons.memory,
             label: '模型与API',
             selected: active == AppNavItem.models,
-            onTap: () => context.go('/settings'),
+            isCollapsed: isCollapsed,
+            onTap: () {
+              ref.read(_activeNavItemProvider.notifier).state = AppNavItem.models;
+              context.go('/settings');
+            },
           ),
           _NavItem(
             icon: Icons.receipt_long_outlined,
             label: '日志中心',
             selected: active == AppNavItem.logs,
-            onTap: () => context.go('/logs'),
+            isCollapsed: isCollapsed,
+            onTap: () {
+              ref.read(_activeNavItemProvider.notifier).state = AppNavItem.logs;
+              context.go('/logs');
+            },
           ),
           const Spacer(),
+          _CollapseToggle(
+            isCollapsed: isCollapsed,
+            onTap: () => ref.read(sidebarCollapsedProvider.notifier).state = !isCollapsed,
+          ),
           const SizedBox(height: 12),
         ],
       ),
@@ -99,7 +126,12 @@ class _Sidebar extends StatelessWidget {
   }
 }
 
+// 当前激活的导航项
+final _activeNavItemProvider = StateProvider<AppNavItem>((ref) => AppNavItem.tasks);
+
 class _BrandHeader extends StatelessWidget {
+  const _BrandHeader();
+
   @override
   Widget build(BuildContext context) {
     return Padding(
@@ -118,7 +150,7 @@ class _BrandHeader extends StatelessWidget {
               ),
               boxShadow: [
                 BoxShadow(
-                  color: const Color(0xFF256AF4).withOpacity(0.3),
+                  color: const Color(0xFF256AF4).withValues(alpha: 0.3),
                   blurRadius: 12,
                   offset: const Offset(0, 6),
                 ),
@@ -158,16 +190,49 @@ class _BrandHeader extends StatelessWidget {
   }
 }
 
+class _CompactBrandHeader extends StatelessWidget {
+  const _CompactBrandHeader();
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Container(
+        width: 40,
+        height: 40,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(10),
+          gradient: const LinearGradient(
+            colors: [Color(0xFF256AF4), Color(0xFF7C3AED)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFF256AF4).withValues(alpha: 0.3),
+              blurRadius: 8,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: const Icon(Icons.record_voice_over,
+            color: Colors.white, size: 20),
+      ),
+    );
+  }
+}
+
 class _NavItem extends StatelessWidget {
   final IconData icon;
   final String label;
   final bool selected;
+  final bool isCollapsed;
   final VoidCallback onTap;
 
   const _NavItem({
     required this.icon,
     required this.label,
     required this.selected,
+    required this.isCollapsed,
     required this.onTap,
   });
 
@@ -175,6 +240,28 @@ class _NavItem extends StatelessWidget {
   Widget build(BuildContext context) {
     final primary = Theme.of(context).colorScheme.primary;
     final base = Theme.of(context).colorScheme.onSurfaceVariant;
+
+    if (isCollapsed) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(10),
+          child: Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: selected ? primary.withValues(alpha: 0.08) : Colors.transparent,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Center(
+              child: Icon(icon, size: 20, color: selected ? primary : base),
+            ),
+          ),
+        ),
+      );
+    }
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       child: InkWell(
@@ -183,7 +270,7 @@ class _NavItem extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           decoration: BoxDecoration(
-            color: selected ? primary.withOpacity(0.08) : Colors.transparent,
+            color: selected ? primary.withValues(alpha: 0.08) : Colors.transparent,
             borderRadius: BorderRadius.circular(12),
             border: Border(
               left: BorderSide(
@@ -206,6 +293,56 @@ class _NavItem extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _CollapseToggle extends StatelessWidget {
+  final bool isCollapsed;
+  final VoidCallback onTap;
+
+  const _CollapseToggle({
+    required this.isCollapsed,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        width: isCollapsed ? 40 : double.infinity,
+        margin: isCollapsed ? EdgeInsets.zero : const EdgeInsets.symmetric(horizontal: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surfaceContainerHighest?.withValues(alpha: 0.5),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: isCollapsed
+            ? Icon(
+                Icons.chevron_right,
+                size: 20,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              )
+            : Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.chevron_left,
+                    size: 18,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    '收起侧边栏',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                  ),
+                ],
+              ),
       ),
     );
   }
@@ -256,6 +393,15 @@ class _TopBarState extends ConsumerState<_TopBar> {
       ),
       child: Row(
         children: [
+          if (widget.title != null) ...[
+            Text(
+              widget.title!,
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+            ),
+            const SizedBox(width: 24),
+          ],
           Expanded(
             child: Container(
               height: 40,
@@ -347,7 +493,7 @@ class _GradientButton extends StatelessWidget {
           borderRadius: BorderRadius.circular(14),
           boxShadow: [
             BoxShadow(
-              color: const Color(0xFF256AF4).withOpacity(0.3),
+              color: const Color(0xFF256AF4).withValues(alpha: 0.3),
               blurRadius: 14,
               offset: const Offset(0, 6),
             ),

@@ -5,9 +5,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:just_audio/just_audio.dart';
 import '../providers/task_provider.dart';
+import '../providers/resizable_panel_provider.dart';
 import '../services/export_service.dart';
 import '../models/task.dart';
+import '../models/conversation_analysis.dart';
 import '../ui/desktop_subpage_header.dart';
+import '../ui/resizable_divider.dart';
 
 class TaskDetailPage extends ConsumerStatefulWidget {
   final String taskId;
@@ -88,7 +91,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage> {
                       );
                     }
                     _loadAudio(task.filePath);
-                    return _DetailBody(task: task, player: _player, audioError: _audioError);
+                    return _DetailBody(task: task, audioError: _audioError);
                   },
                   loading: () => const _EmptyState(
                     title: '加载中',
@@ -207,7 +210,7 @@ class _DetailTopBar extends StatelessWidget {
         right: desktopWindowInsetRight(),
       ),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.9),
+        color: Colors.white.withValues(alpha: 0.9),
         border: const Border(bottom: BorderSide(color: Color(0xFFF1F5F9))),
       ),
       child: Row(
@@ -283,7 +286,7 @@ class _DetailTopBar extends StatelessWidget {
                 borderRadius: BorderRadius.circular(10),
                 boxShadow: [
                   BoxShadow(
-                    color: const Color(0xFF256AF4).withOpacity(0.3),
+                    color: const Color(0xFF256AF4).withValues(alpha: 0.3),
                     blurRadius: 10,
                     offset: const Offset(0, 6),
                   ),
@@ -304,7 +307,7 @@ class _DetailTopBar extends StatelessWidget {
             height: 32,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(999),
-              border: Border.all(color: const Color(0xFF256AF4).withOpacity(0.2), width: 2),
+              border: Border.all(color: const Color(0xFF256AF4).withValues(alpha: 0.2), width: 2),
               color: const Color(0xFFE2E8F0),
             ),
             child: const Icon(Icons.person, size: 16, color: Color(0xFF64748B)),
@@ -401,19 +404,28 @@ class _EmptyState extends StatelessWidget {
   }
 }
 
-class _DetailBody extends StatelessWidget {
+class _DetailBody extends ConsumerWidget {
   final Task task;
-  final AudioPlayer player;
   final String? audioError;
-  const _DetailBody({required this.task, required this.player, this.audioError});
+  const _DetailBody({required this.task, this.audioError});
 
   @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(child: _TranscriptPanel(task: task)),
-        SizedBox(width: 320, child: _InsightsPanel(audioError: audioError)),
-      ],
+  Widget build(BuildContext context, WidgetRef ref) {
+    return ResizableSplitLayout(
+      firstPanel: _TranscriptPanel(task: task),
+      secondPanel: Container(
+        decoration: BoxDecoration(
+          border: Border(
+            left: BorderSide(color: Theme.of(context).dividerColor),
+          ),
+          color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.4),
+        ),
+        child: _InsightsPanel(audioError: audioError),
+      ),
+      initialSecondWidth: 320,
+      widthProvider: detailInsightsWidthProvider,
+      minSecondWidth: kMinPanelWidth,
+      maxSecondWidthRatio: kMaxPanelWidthRatio,
     );
   }
 }
@@ -474,7 +486,7 @@ class _TranscriptSegment extends StatelessWidget {
                 width: 28,
                 height: 28,
                 decoration: BoxDecoration(
-                  color: color.withOpacity(0.15),
+                  color: color.withValues(alpha: 0.15),
                   shape: BoxShape.circle,
                 ),
                 child: Center(
@@ -581,6 +593,10 @@ class _InsightsPanel extends ConsumerWidget {
                   .map((k) => _KeywordChip(label: k))
                   .toList(),
             ),
+            const SizedBox(height: 24),
+            const Divider(height: 1, color: Color(0xFFE2E8F0)),
+            const SizedBox(height: 24),
+            if (task != null) _ConversationAnalysisPanel(task: task),
           ],
         ),
       ),
@@ -634,6 +650,443 @@ class _KeywordChip extends StatelessWidget {
         style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w800, color: Color(0xFF64748B), letterSpacing: 1.0),
       ),
     );
+  }
+}
+
+class _ConversationAnalysisPanel extends StatelessWidget {
+  final Task task;
+  const _ConversationAnalysisPanel({required this.task});
+
+  @override
+  Widget build(BuildContext context) {
+    final analysis = task.conversationAnalysis;
+    final isProcessing = task.status == TaskStatus.processing && task.enableConversationAnalysis;
+
+    if (!task.enableConversationAnalysis) {
+      return const SizedBox.shrink();
+    }
+
+    if (isProcessing) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: const [
+              Icon(Icons.psychology, size: 16, color: Color(0xFF6366F1)),
+              SizedBox(width: 8),
+              Text('客服对话分析', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800)),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF1F5F9),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+            ),
+            child: Row(
+              children: [
+                const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF6366F1)),
+                ),
+                const SizedBox(width: 12),
+                const Text('正在分析对话内容...', style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+              ],
+            ),
+          ),
+        ],
+      );
+    }
+
+    if (analysis == null) {
+      return const SizedBox.shrink();
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Icon(Icons.psychology, size: 16, color: Color(0xFF6366F1)),
+            const SizedBox(width: 8),
+            const Text('客服对话分析', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800)),
+            const Spacer(),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: _getTypeColor(analysis.info.type).withOpacity(0.1),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: _getTypeColor(analysis.info.type).withOpacity(0.3)),
+              ),
+              child: Text(
+                analysis.info.type,
+                style: TextStyle(
+                  fontSize: 9,
+                  fontWeight: FontWeight.w800,
+                  color: _getTypeColor(analysis.info.type),
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+
+        // 客户画像
+        if (analysis.customerProfile.customerType != '未知') ...[
+          _buildSectionTitle('客户画像'),
+          const SizedBox(height: 8),
+          _buildInfoCard([
+            _buildInfoRow('类型', analysis.customerProfile.customerType),
+            if (analysis.customerProfile.coreDemand.isNotEmpty)
+              _buildInfoRow('核心诉求', analysis.customerProfile.coreDemand),
+            if (analysis.customerProfile.expectedSolution.isNotEmpty)
+              _buildInfoRow('期望方案', analysis.customerProfile.expectedSolution),
+          ]),
+          const SizedBox(height: 16),
+        ],
+
+        // 情绪分析
+        _buildSectionTitle('情绪分析'),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            _buildEmotionBadge('初始', analysis.emotionAnalysis.initialEmotion),
+            const SizedBox(width: 8),
+            const Icon(Icons.arrow_forward, size: 12, color: Color(0xFFCBD5E1)),
+            const SizedBox(width: 8),
+            _buildEmotionBadge('峰值', analysis.emotionAnalysis.peakEmotion),
+            const SizedBox(width: 8),
+            const Icon(Icons.arrow_forward, size: 12, color: Color(0xFFCBD5E1)),
+            const SizedBox(width: 8),
+            _buildEmotionBadge('结束', analysis.emotionAnalysis.finalEmotion),
+          ],
+        ),
+        if (analysis.emotionAnalysis.emotionNodes.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          ...analysis.emotionAnalysis.emotionNodes.take(3).map((node) => _buildEmotionNode(node)),
+        ],
+        const SizedBox(height: 16),
+
+        // 问题反馈
+        if (analysis.feedbackAnalysis?.summary.isNotEmpty == true) ...[
+          _buildSectionTitle('问题反馈'),
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFEF3C7),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: const Color(0xFFFDE68A)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: _hexToColor(analysis.feedbackAnalysis!.severity.color),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        analysis.feedbackAnalysis!.severity.level,
+                        style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w800, color: Colors.white),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      analysis.feedbackAnalysis!.problemType.level1,
+                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF92400E)),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  analysis.feedbackAnalysis!.summary,
+                  style: const TextStyle(fontSize: 11, color: Color(0xFF78350F), height: 1.4),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+        ],
+
+        // 对话质量 - 使用激烈程度评分
+        _buildSectionTitle('对话质量'),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            _buildQualityScore('冲突', analysis.quality.intensity.conflictLevel),
+            const SizedBox(width: 12),
+            _buildQualityScore('情绪', analysis.quality.intensity.emotionIntensity),
+            const SizedBox(width: 12),
+            _buildQualityScore('语言', analysis.quality.intensity.languageIntensity),
+            const SizedBox(width: 12),
+            _buildQualityScore('紧张', analysis.quality.intensity.tensionLevel),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: _hexToColor(analysis.quality.intensity.color).withOpacity(0.1),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: _hexToColor(analysis.quality.intensity.color).withOpacity(0.3)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                '综合评级: ',
+                style: TextStyle(fontSize: 10, color: Color(0xFF64748B)),
+              ),
+              Text(
+                analysis.quality.intensity.overallRating,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                  color: _hexToColor(analysis.quality.intensity.color),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        // 解决状态
+        _buildSectionTitle('处理结果'),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: _hexToColor(analysis.resolution.color).withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: _hexToColor(analysis.resolution.color).withOpacity(0.3),
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    analysis.resolution.customerSatisfied ? Icons.check_circle : Icons.pending,
+                    size: 14,
+                    color: _hexToColor(analysis.resolution.color),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    analysis.resolution.status,
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: _hexToColor(analysis.resolution.color),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            if (analysis.info.durationMinutes > 0)
+              Text(
+                '时长 ${analysis.info.durationMinutes} 分钟',
+                style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+              ),
+          ],
+        ),
+        if (analysis.resolution.summary.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Text(
+            analysis.resolution.summary,
+            style: const TextStyle(fontSize: 11, color: Color(0xFF64748B), height: 1.4),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildSectionTitle(String title) {
+    return Text(
+      title,
+      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: Color(0xFF94A3B8)),
+    );
+  }
+
+  Widget _buildInfoCard(List<Widget> children) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: children,
+      ),
+    );
+  }
+
+  Widget _buildInfoRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '$label: ',
+            style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8)),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF475569)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmotionBadge(String label, String emotion) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: _getEmotionColor(emotion).withOpacity(0.1),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: _getEmotionColor(emotion).withOpacity(0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(fontSize: 9, color: Color(0xFF64748B)),
+          ),
+          const SizedBox(width: 4),
+          Text(
+            emotion,
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+              color: _getEmotionColor(emotion),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmotionNode(EmotionNode node) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 6,
+            height: 6,
+            margin: const EdgeInsets.only(top: 5),
+            decoration: BoxDecoration(
+              color: _getEmotionColor(node.customerEmotion),
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  node.trigger,
+                  style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: Color(0xFF475569)),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '客户: ${node.customerEmotion} · 客服: ${node.agentResponse}',
+                  style: TextStyle(fontSize: 9, color: const Color(0xFF64748B).withOpacity(0.8)),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildQualityScore(String label, int score) {
+    final color = score >= 80
+        ? const Color(0xFF10B981)
+        : score >= 60
+            ? const Color(0xFFF59E0B)
+            : const Color(0xFFEF4444);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withOpacity(0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(fontSize: 10, color: Color(0xFF64748B)),
+          ),
+          const SizedBox(width: 4),
+          Text(
+            '$score',
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: color),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Color _getEmotionColor(String emotion) {
+    switch (emotion) {
+      case '愤怒':
+      case '失望':
+        return const Color(0xFFEF4444);
+      case '焦虑':
+      case '疑惑':
+        return const Color(0xFFF59E0B);
+      case '平和':
+      case '满意':
+        return const Color(0xFF10B981);
+      case '兴奋':
+        return const Color(0xFF8B5CF6);
+      default:
+        return const Color(0xFF64748B);
+    }
+  }
+
+  Color _getTypeColor(String type) {
+    switch (type) {
+      case '投诉':
+        return const Color(0xFFDC2626);
+      case '售后':
+        return const Color(0xFFEA580C);
+      case '技术支持':
+        return const Color(0xFF2563EB);
+      case '售前':
+        return const Color(0xFF7C3AED);
+      case '账单疑问':
+        return const Color(0xFF059669);
+      default:
+        return const Color(0xFF64748B);
+    }
+  }
+
+  Color _hexToColor(String hex) {
+    final hexCode = hex.replaceAll('#', '');
+    return Color(int.parse('FF$hexCode', radix: 16));
   }
 }
 

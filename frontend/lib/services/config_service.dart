@@ -4,11 +4,23 @@ import 'package:dio/dio.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:yaml/yaml.dart';
 import '../models/channel.dart';
+import '../models/prompt_history.dart';
+import 'database_service.dart';
 import 'logger_service.dart';
 
 class ConfigService {
   static const String _configFileName = 'config.json';
   static AppConfig? _cachedConfig;
+
+  static const String defaultConversationAnalysisPrompt =
+      r'你是一个专业的客服对话分析专家。请对以下客服-客户对话进行深度分析，并以JSON格式返回分析结果。\n\n'
+      r'对话内容：\n'
+      r'```\n'
+      r'{transcription}\n'
+      r'```\n\n'
+      r'请按照以下JSON结构输出分析结果（只输出JSON，不要其他内容）：\n\n'
+      r'{ "info": { "type": "对话类型", "scenario": "场景", "summary": "摘要" }, "customer": { "customerId": "客户ID", "customerName": "客户姓名", "contactInfo": "联系方式", "customerType": "客户类型", "accountInfo": "账号信息" }, "emotion": { "customerEmotion": "情绪", "intensity": 5, "trends": "情绪变化", "keyTriggers": ["触发点"] }, "feedback": { "hasIssue": true, "issueAbstract": "问题摘要", "category": {"l1": "一级分类", "l2": "二级分类"}, "severity": "严重程度", "expectations": ["期望"] }, "quality": { "agentPerformance": "客服表现", "responseTime": "响应时间", "professionalism": 8, "communication": 8, "resolutionWillingness": 9 }, "resolution": { "status": "解决状态", "customerSatisfied": true, "resolutionTimeMinutes": 15, "summary": "解决方案摘要", "nextSteps": ["步骤"] }, "structured": { "products": ["产品"], "keywords": ["关键词"], "entities": {}, "tags": ["标签"] } }\n\n'
+      r'注意：返回必须是合法的JSON格式，不要有注释，所有字段都必须包含。';
 
   // 获取配置目录
   Future<String> get _configDir async {
@@ -252,6 +264,9 @@ class ConfigService {
         maxFileMb: 20,
         retentionDays: 7,
       ),
+      prompts: PromptsConfig(
+        conversationAnalysis: defaultConversationAnalysisPrompt,
+      ),
     );
   }
 
@@ -300,6 +315,86 @@ class ConfigService {
         channels: maskedSummaryChannels,
       ),
     );
+  }
+
+  // 提示词管理方法
+  Future<String> getActivePrompt(String promptType) async {
+    final db = DatabaseService.instance;
+    final activePrompt = await db.getActivePrompt(promptType);
+    if (activePrompt != null) {
+      return activePrompt.content;
+    }
+    // 如果没有激活的提示词，使用配置中的默认提示词
+    final config = await loadConfig();
+    if (promptType == 'conversation_analysis') {
+      return config.prompts.conversationAnalysis.isNotEmpty
+          ? config.prompts.conversationAnalysis
+          : defaultConversationAnalysisPrompt;
+    }
+    return '';
+  }
+
+  Future<void> savePromptVersion(
+    String promptType,
+    String content, {
+    String? note,
+    String? createdBy,
+  }) async {
+    final db = DatabaseService.instance;
+
+    // 获取下一个版本号
+    final nextVersion = await db.getNextPromptVersion(promptType);
+
+    // 创建新的历史记录
+    final history = PromptHistory(
+      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      promptType: promptType,
+      content: content,
+      version: nextVersion,
+      isActive: true,
+      note: note,
+      createdAt: DateTime.now(),
+      createdBy: createdBy,
+    );
+
+    // 插入新记录
+    await db.insertPromptHistory(history);
+
+    // 设置为激活状态（会自动取消其他版本的激活状态）
+    await db.setActivePrompt(promptType, history.id);
+
+    // 同时更新配置文件
+    final config = await loadConfig();
+    if (promptType == 'conversation_analysis') {
+      final newConfig = config.copyWith(
+        prompts: config.prompts.copyWith(conversationAnalysis: content),
+      );
+      await saveConfig(newConfig);
+    }
+  }
+
+  Future<List<PromptHistory>> getPromptHistory(String promptType,
+      {int limit = 20}) async {
+    return await DatabaseService.instance.getPromptHistory(promptType,
+        limit: limit);
+  }
+
+  Future<void> activatePromptVersion(String promptType, String id) async {
+    final db = DatabaseService.instance;
+
+    // 设置为激活状态
+    await db.setActivePrompt(promptType, id);
+
+    // 获取该版本内容并更新配置
+    final history = await db.getPromptHistory(promptType);
+    final selected = history.firstWhere((h) => h.id == id);
+    final config = await loadConfig();
+    if (promptType == 'conversation_analysis') {
+      final newConfig = config.copyWith(
+        prompts: config.prompts.copyWith(conversationAnalysis: selected.content),
+      );
+      await saveConfig(newConfig);
+    }
   }
 }
 

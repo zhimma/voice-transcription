@@ -6,14 +6,18 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:just_audio/just_audio.dart';
 import '../providers/task_provider.dart';
+import '../providers/resizable_panel_provider.dart';
 import '../models/task.dart';
 import '../services/export_service.dart';
 import '../ui/app_shell.dart';
+import '../ui/resizable_divider.dart';
 
 final taskDateFilterProvider = StateProvider<String>((ref) => 'all');
 final taskStatusFilterProvider = StateProvider<String>((ref) => 'all');
+final taskProviderFilterProvider = StateProvider<String>((ref) => 'all');
 final taskPageProvider = StateProvider<int>((ref) => 1);
 final taskPageSizeProvider = StateProvider<int>((ref) => 8);
+final taskSearchControllerProvider = Provider<TextEditingController>((ref) => TextEditingController());
 
 class HomePage extends ConsumerStatefulWidget {
   final bool embedded;
@@ -52,20 +56,21 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-    final content = Row(
-      children: [
-        const Expanded(child: _TaskListPanel()),
-        Container(
-          width: 460,
-          decoration: BoxDecoration(
-            border: Border(
-              left: BorderSide(color: Theme.of(context).dividerColor),
-            ),
-            color: Theme.of(context).colorScheme.surface.withOpacity(0.4),
+    final content = ResizableSplitLayout(
+      firstPanel: const _TaskListPanel(),
+      secondPanel: Container(
+        decoration: BoxDecoration(
+          border: Border(
+            left: BorderSide(color: Theme.of(context).dividerColor),
           ),
-          child: const _InspectorPanel(),
+          color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.4),
         ),
-      ],
+        child: const _InspectorPanel(),
+      ),
+      initialSecondWidth: 460,
+      widthProvider: homeInspectorWidthProvider,
+      minSecondWidth: kMinPanelWidth,
+      maxSecondWidthRatio: kMaxPanelWidthRatio,
     );
     if (widget.embedded) return content;
     return AppShell(
@@ -84,8 +89,10 @@ class _TaskListPanel extends ConsumerWidget {
     final tasksAsync = ref.watch(taskListProvider);
     final dateFilter = ref.watch(taskDateFilterProvider);
     final statusFilter = ref.watch(taskStatusFilterProvider);
+    final providerFilter = ref.watch(taskProviderFilterProvider);
     final page = ref.watch(taskPageProvider);
     final pageSize = ref.watch(taskPageSizeProvider);
+    final searchController = ref.watch(taskSearchControllerProvider);
 
     return Container(
       color: Theme.of(context).colorScheme.surface,
@@ -93,6 +100,7 @@ class _TaskListPanel extends ConsumerWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // 第一行：主要筛选器
           Wrap(
             spacing: 8,
             runSpacing: 8,
@@ -119,6 +127,16 @@ class _TaskListPanel extends ConsumerWidget {
                 ),
               ),
               SizedBox(
+                width: 120,
+                child: _ProviderFilter(
+                  value: providerFilter,
+                  onChanged: (v) {
+                    ref.read(taskProviderFilterProvider.notifier).state = v;
+                    ref.read(taskPageProvider.notifier).state = 1;
+                  },
+                ),
+              ),
+              SizedBox(
                 width: 96,
                 child: _PageSizeFilter(
                   value: pageSize,
@@ -128,17 +146,38 @@ class _TaskListPanel extends ConsumerWidget {
                   },
                 ),
               ),
+              // 刷新按钮
+              _RefreshButton(
+                onPressed: () async {
+                  final keyword = ref.read(taskKeywordProvider);
+                  await ref.read(taskListProvider.notifier).loadTasks(
+                    keyword: keyword,
+                    silent: true,
+                  );
+                },
+              ),
             ],
           ),
           const SizedBox(height: 8),
+          // 第二行：搜索框
+          _SearchField(
+            controller: searchController,
+            onChanged: (value) {
+              ref.read(taskKeywordProvider.notifier).state = value;
+              ref.read(taskPageProvider.notifier).state = 1;
+            },
+          ),
+          const SizedBox(height: 12),
           _TableHeader(),
           const SizedBox(height: 8),
           Expanded(
             child: tasksAsync.when(
               data: (tasks) {
-                final filtered = _applyStatusFilter(
-                  _applyDateFilter(tasks, dateFilter),
-                  statusFilter,
+                final filtered = _applyFilters(
+                  tasks,
+                  dateFilter: dateFilter,
+                  statusFilter: statusFilter,
+                  providerFilter: providerFilter,
                 );
                 if (tasks.isEmpty) {
                   return _EmptyState();
@@ -166,9 +205,11 @@ class _TaskListPanel extends ConsumerWidget {
           ),
           tasksAsync.when(
             data: (tasks) {
-              final filtered = _applyStatusFilter(
-                _applyDateFilter(tasks, dateFilter),
-                statusFilter,
+              final filtered = _applyFilters(
+                tasks,
+                dateFilter: dateFilter,
+                statusFilter: statusFilter,
+                providerFilter: providerFilter,
               );
               if (filtered.isEmpty) return const SizedBox.shrink();
               final totalPages = (filtered.length / pageSize).ceil();
@@ -186,6 +227,46 @@ class _TaskListPanel extends ConsumerWidget {
         ],
       ),
     );
+  }
+
+  List<Task> _applyFilters(
+    List<Task> tasks, {
+    required String dateFilter,
+    required String statusFilter,
+    required String providerFilter,
+  }) {
+    return tasks.where((task) {
+      // 日期过滤
+      if (dateFilter != 'all') {
+        final now = DateTime.now();
+        final today = DateTime(now.year, now.month, now.day);
+        final taskDate = DateTime(
+          task.createdAt.year,
+          task.createdAt.month,
+          task.createdAt.day,
+        );
+        if (dateFilter == 'today' && taskDate != today) {
+          return false;
+        }
+        if (dateFilter == 'week') {
+          final weekStart = today.subtract(Duration(days: today.weekday - 1));
+          if (taskDate.isBefore(weekStart)) return false;
+        }
+        if (dateFilter == 'month') {
+          final monthStart = DateTime(now.year, now.month, 1);
+          if (taskDate.isBefore(monthStart)) return false;
+        }
+      }
+      // 状态过滤
+      if (statusFilter != 'all' && task.status.name != statusFilter) {
+        return false;
+      }
+      // 提供商过滤
+      if (providerFilter != 'all' && task.provider != providerFilter) {
+        return false;
+      }
+      return true;
+    }).toList();
   }
 }
 
@@ -348,6 +429,141 @@ class _PageSizeFilter extends StatelessWidget {
             DropdownMenuItem(value: 50, child: Text('50/页')),
           ],
           onChanged: (v) => onChanged(v ?? 8),
+        ),
+      ),
+    );
+  }
+}
+
+class _ProviderFilter extends StatelessWidget {
+  final String value;
+  final ValueChanged<String> onChanged;
+  const _ProviderFilter({required this.value, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 34,
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        border: Border.all(color: Theme.of(context).dividerColor),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: value,
+          isDense: true,
+          isExpanded: true,
+          items: const [
+            DropdownMenuItem(value: 'all', child: Text('全部来源')),
+            DropdownMenuItem(value: 'whisper', child: Text('Whisper')),
+            DropdownMenuItem(value: 'qwen', child: Text('通义千问')),
+            DropdownMenuItem(value: 'openai', child: Text('OpenAI')),
+            DropdownMenuItem(value: 'azure', child: Text('Azure')),
+          ],
+          onChanged: (v) => onChanged(v ?? 'all'),
+        ),
+      ),
+    );
+  }
+}
+
+class _RefreshButton extends StatefulWidget {
+  final VoidCallback onPressed;
+  const _RefreshButton({required this.onPressed});
+
+  @override
+  State<_RefreshButton> createState() => _RefreshButtonState();
+}
+
+class _RefreshButtonState extends State<_RefreshButton>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  bool _isRefreshing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      duration: const Duration(milliseconds: 800),
+      vsync: this,
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _onPressed() async {
+    if (_isRefreshing) return;
+    setState(() => _isRefreshing = true);
+    _controller.repeat();
+    widget.onPressed();
+    await Future.delayed(const Duration(milliseconds: 800));
+    _controller.stop();
+    _controller.reset();
+    setState(() => _isRefreshing = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return RotationTransition(
+      turns: _controller.drive(Tween(begin: 0.0, end: 1.0)),
+      child: IconButton(
+        icon: const Icon(Icons.refresh_rounded, size: 20),
+        onPressed: _onPressed,
+        tooltip: '刷新',
+        style: IconButton.styleFrom(
+          foregroundColor: Theme.of(context).colorScheme.primary,
+        ),
+      ),
+    );
+  }
+}
+
+class _SearchField extends StatelessWidget {
+  final TextEditingController controller;
+  final ValueChanged<String> onChanged;
+  const _SearchField({required this.controller, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 280,
+      child: TextField(
+        controller: controller,
+        onChanged: onChanged,
+        decoration: InputDecoration(
+          hintText: '搜索任务...',
+          prefixIcon: const Icon(Icons.search, size: 18),
+          suffixIcon: controller.text.isNotEmpty
+              ? IconButton(
+                  icon: const Icon(Icons.clear, size: 16),
+                  onPressed: () {
+                    controller.clear();
+                    onChanged('');
+                  },
+                )
+              : null,
+          isDense: true,
+          contentPadding: const EdgeInsets.symmetric(vertical: 10),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide: BorderSide(color: Theme.of(context).dividerColor),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide: BorderSide(color: Theme.of(context).dividerColor),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide: BorderSide(color: Theme.of(context).colorScheme.primary),
+          ),
+          filled: true,
+          fillColor: Theme.of(context).colorScheme.surface,
         ),
       ),
     );

@@ -1,10 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
-import 'package:sqflite/sqflite.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:path/path.dart';
 import 'package:path_provider/path_provider.dart';
 import '../models/task.dart';
 import '../models/conversation_analysis.dart';
+import '../models/prompt_history.dart';
 
 class DatabaseService {
   static Database? _db;
@@ -24,7 +25,7 @@ class DatabaseService {
 
     return await openDatabase(
       dbPath,
-      version: 4,
+      version: 5,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -116,6 +117,20 @@ class DatabaseService {
       )
     ''');
 
+    // 提示词历史表
+    await db.execute('''
+      CREATE TABLE prompt_history (
+        id TEXT PRIMARY KEY,
+        prompt_type TEXT NOT NULL,
+        content TEXT NOT NULL,
+        version INTEGER NOT NULL,
+        is_active INTEGER DEFAULT 0,
+        note TEXT,
+        created_at TEXT NOT NULL,
+        created_by TEXT
+      )
+    ''');
+
     // 索引
     await db.execute('CREATE INDEX idx_tasks_status ON tasks(status)');
     await db.execute('CREATE INDEX idx_tasks_created_at ON tasks(created_at)');
@@ -125,6 +140,10 @@ class DatabaseService {
         .execute('CREATE INDEX idx_summaries_task_id ON summaries(task_id)');
     await db.execute(
         'CREATE INDEX idx_conversation_analyses_task_id ON conversation_analyses(task_id)');
+    await db.execute(
+        'CREATE INDEX idx_prompt_history_type ON prompt_history(prompt_type)');
+    await db.execute(
+        'CREATE INDEX idx_prompt_history_active ON prompt_history(is_active)');
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
@@ -169,6 +188,30 @@ class DatabaseService {
       try {
         await db.execute(
             'CREATE INDEX idx_conversation_analyses_task_id ON conversation_analyses(task_id)');
+      } catch (_) {}
+    }
+    if (oldVersion < 5) {
+      try {
+        await db.execute('''
+          CREATE TABLE prompt_history (
+            id TEXT PRIMARY KEY,
+            prompt_type TEXT NOT NULL,
+            content TEXT NOT NULL,
+            version INTEGER NOT NULL,
+            is_active INTEGER DEFAULT 0,
+            note TEXT,
+            created_at TEXT NOT NULL,
+            created_by TEXT
+          )
+        ''');
+      } catch (_) {}
+      try {
+        await db.execute(
+            'CREATE INDEX idx_prompt_history_type ON prompt_history(prompt_type)');
+      } catch (_) {}
+      try {
+        await db.execute(
+            'CREATE INDEX idx_prompt_history_active ON prompt_history(is_active)');
       } catch (_) {}
     }
   }
@@ -508,6 +551,92 @@ class DatabaseService {
       endTime: map['end_time'] != null ? DateTime.parse(map['end_time']) : null,
       error: map['error'],
       logs: map['logs']?.toString().split('\n') ?? [],
+    );
+  }
+
+  // 提示词历史管理
+  Future<String> insertPromptHistory(PromptHistory history) async {
+    final db = await database;
+    await db.insert('prompt_history', _promptHistoryToMap(history));
+    return history.id;
+  }
+
+  Future<List<PromptHistory>> getPromptHistory(String promptType,
+      {int limit = 20}) async {
+    final db = await database;
+    final maps = await db.query(
+      'prompt_history',
+      where: 'prompt_type = ?',
+      whereArgs: [promptType],
+      orderBy: 'version DESC',
+      limit: limit,
+    );
+    return maps.map(_mapToPromptHistory).toList();
+  }
+
+  Future<PromptHistory?> getActivePrompt(String promptType) async {
+    final db = await database;
+    final maps = await db.query(
+      'prompt_history',
+      where: 'prompt_type = ? AND is_active = 1',
+      whereArgs: [promptType],
+      limit: 1,
+    );
+    if (maps.isEmpty) return null;
+    return _mapToPromptHistory(maps.first);
+  }
+
+  Future<void> setActivePrompt(String promptType, String id) async {
+    final db = await database;
+    await db.transaction((txn) async {
+      await txn.update(
+        'prompt_history',
+        {'is_active': 0},
+        where: 'prompt_type = ?',
+        whereArgs: [promptType],
+      );
+      await txn.update(
+        'prompt_history',
+        {'is_active': 1},
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+    });
+  }
+
+  Future<int> getNextPromptVersion(String promptType) async {
+    final db = await database;
+    final result = await db.rawQuery(
+      'SELECT MAX(version) as max_version FROM prompt_history WHERE prompt_type = ?',
+      [promptType],
+    );
+    final maxVersion = result.first['max_version'] as int? ?? 0;
+    return maxVersion + 1;
+  }
+
+  Map<String, dynamic> _promptHistoryToMap(PromptHistory history) {
+    return {
+      'id': history.id,
+      'prompt_type': history.promptType,
+      'content': history.content,
+      'version': history.version,
+      'is_active': history.isActive ? 1 : 0,
+      'note': history.note,
+      'created_at': history.createdAt.toIso8601String(),
+      'created_by': history.createdBy,
+    };
+  }
+
+  PromptHistory _mapToPromptHistory(Map<String, dynamic> map) {
+    return PromptHistory(
+      id: map['id'],
+      promptType: map['prompt_type'],
+      content: map['content'],
+      version: map['version'],
+      isActive: map['is_active'] == 1,
+      note: map['note'],
+      createdAt: DateTime.parse(map['created_at']),
+      createdBy: map['created_by'],
     );
   }
 

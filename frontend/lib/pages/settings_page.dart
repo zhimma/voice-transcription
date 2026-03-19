@@ -137,6 +137,8 @@ class _SettingsContentState extends ConsumerState<_SettingsContent> {
                 const SizedBox(height: 12),
                 _LocalModelList(),
                 const SizedBox(height: 48),
+                _PromptsConfigSection(config: config),
+                const SizedBox(height: 48),
                 _KeyboardShortcutsSection(),
               ],
             ],
@@ -1475,6 +1477,208 @@ class _MetaPill extends StatelessWidget {
           color: Color(0xFF475569),
         ),
       ),
+    );
+  }
+}
+
+class _PromptsConfigSection extends ConsumerStatefulWidget {
+  final AppConfig config;
+  const _PromptsConfigSection({required this.config});
+
+  @override
+  ConsumerState<_PromptsConfigSection> createState() => _PromptsConfigSectionState();
+}
+
+class _PromptsConfigSectionState extends ConsumerState<_PromptsConfigSection> {
+  late final TextEditingController _controller;
+  bool _isEditing = false;
+  bool _isSaving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(
+      text: widget.config.prompts.conversationAnalysis,
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    setState(() => _isSaving = true);
+    final updated = widget.config.copyWith(
+      prompts: widget.config.prompts.copyWith(
+        conversationAnalysis: _controller.text.trim(),
+      ),
+    );
+    await ref.read(configProvider.notifier).saveConfig(updated);
+    if (!mounted) return;
+    setState(() {
+      _isSaving = false;
+      _isEditing = false;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('提示词配置已保存')),
+    );
+  }
+
+  void _resetToDefault() {
+    final defaultPrompt = ConfigService().loadConfig().then((config) {
+      // Get the default prompt from the config service's default config
+      return config.prompts.conversationAnalysis;
+    });
+    defaultPrompt.then((prompt) {
+      if (prompt.isEmpty) {
+        // Fallback default prompt if empty
+        _controller.text = _fallbackDefaultPrompt;
+      } else {
+        _controller.text = prompt;
+      }
+    });
+  }
+
+  static const String _fallbackDefaultPrompt =
+      r'你是一个专业的客服对话分析专家。请对以下客服-客户对话进行深度分析，并以JSON格式返回分析结果。\n\n'
+      r'对话内容：\n'
+      r'```\n'
+      r'{transcription}\n'
+      r'```\n\n'
+      r'请分析对话的客户画像、情绪变化、问题反馈、对话质量和解决情况，并以JSON格式返回。';
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const _SectionHeader(
+              title: '提示词配置',
+              subtitle: '自定义对话分析提示词，使用 {transcription} 作为转写内容占位符。',
+            ),
+            const Spacer(),
+            if (!_isEditing)
+              TextButton.icon(
+                onPressed: () => setState(() => _isEditing = true),
+                icon: const Icon(Icons.edit, size: 16),
+                label: const Text('编辑'),
+              )
+            else
+              Row(
+                children: [
+                  TextButton(
+                    onPressed: _isSaving ? null : () => setState(() => _isEditing = false),
+                    child: const Text('取消'),
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton(
+                    onPressed: _isSaving ? null : _save,
+                    child: _isSaving
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Text('保存'),
+                  ),
+                ],
+              ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: const Color(0xFFE2E8F0)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    Icons.psychology,
+                    size: 18,
+                    color: const Color(0xFF256AF4),
+                  ),
+                  const SizedBox(width: 8),
+                  const Text(
+                    '对话分析提示词',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const Spacer(),
+                  if (_isEditing)
+                    TextButton.icon(
+                      onPressed: _resetToDefault,
+                      icon: const Icon(Icons.refresh, size: 16),
+                      label: const Text('恢复默认'),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _controller,
+                maxLines: _isEditing ? 15 : 5,
+                minLines: 5,
+                readOnly: !_isEditing,
+                decoration: InputDecoration(
+                  border: _isEditing
+                      ? const OutlineInputBorder()
+                      : InputBorder.none,
+                  fillColor: _isEditing ? null : const Color(0xFFF8FAFC),
+                  filled: !_isEditing,
+                  hintText: '请输入对话分析提示词...',
+                  contentPadding: const EdgeInsets.all(12),
+                ),
+                style: const TextStyle(
+                  fontSize: 12,
+                  height: 1.5,
+                  fontFamily: 'monospace',
+                ),
+              ),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEFF6FF),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.info_outline,
+                      size: 16,
+                      color: const Color(0xFF256AF4),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        '提示：使用 {transcription} 作为转写文本的占位符，系统会在分析时自动替换为实际内容。'
+                        '提示词应指导模型输出有效的 JSON 格式数据。',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: const Color(0xFF256AF4).withOpacity(0.8),
+                          height: 1.4,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }
