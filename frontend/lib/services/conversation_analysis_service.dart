@@ -14,108 +14,114 @@ class ConversationAnalysisService {
       '```\n'
       '{transcription}\n'
       '```\n\n'
-      '请按照以下JSON结构输出分析结果（只输出JSON，不要其他内容）：\n\n'
+      '请按照以下JSON结构输出分析结果（只输出JSON，不要其他内容）。注意：所有 JSON 键名必须使用中文！\n\n'
       r'```json'
       '\n'
       '{\n'
-      '  "info": {\n'
-      '    "type": "对话类型：咨询/投诉/售后/售前/技术支持/账单疑问/其他",\n'
-      '    "business_tag": "业务标签",\n'
-      '    "duration_minutes": "对话时长分钟数",\n'
-      '    "customer_turns": "客户发言次数",\n'
-      '    "agent_turns": "客服发言次数"\n'
+      '  "基础信息": {\n'
+      '    "对话类型": "咨询/投诉/售后/售前/技术支持/账单疑问/其他",\n'
+      '    "业务标签": "业务标签名称",\n'
+      '    "对话时长": "对话时长分钟数",\n'
+      '    "客户发言次数": "客户发言次数",\n'
+      '    "客服发言次数": "客服发言次数"\n'
       '  },\n'
-      '  "customer_profile": {\n'
-      '    "customer_type": "客户类型：新客/老客户/VIP/潜在高价值客户/未知",\n'
-      '    "tags": ["画像标签：理性型/冲动型/耐心/急躁/专业/小白等"],\n'
-      '    "consumption_feature": "消费特征描述",\n'
-      '    "history_relation": "历史关系描述",\n'
-      '    "core_demand": "核心诉求",\n'
-      '    "explicit_needs": ["显性需求列表"],\n'
-      '    "implicit_needs": ["隐性需求列表"],\n'
-      '    "expected_solution": "期望解决方案"\n'
+      '  "客户画像": {\n'
+      '    "客户类型": "新客/老客户/VIP/潜在高价值客户/未知",\n'
+      '    "画像标签": ["理性型/冲动型/耐心/急躁/专业/小白等"],\n'
+      '    "消费特征": "消费特征描述",\n'
+      '    "历史关系": "历史关系描述",\n'
+      '    "核心诉求": "核心诉求",\n'
+      '    "显性需求": ["显性需求列表"],\n'
+      '    "隐性需求": ["隐性需求列表"],\n'
+      '    "期望解决方案": "期望解决方案"\n'
       '  },\n'
-      '  "emotion_analysis": {\n'
-      '    "initial_emotion": "初始情绪：平和/满意/疑惑/焦虑/愤怒/失望/兴奋",\n'
-      '    "peak_emotion": "峰值情绪",\n'
-      '    "final_emotion": "结束情绪",\n'
-      '    "emotion_trend": "情绪趋势：上升/下降/波动/平稳",\n'
-      '    "emotion_nodes": [\n'
+      '  "情绪分析": {\n'
+      '    "整体情绪": "整体对话情绪：平和/友好/紧张/激烈/对抗",\n'
+      '    "初始情绪": "客户初始情绪：平和/满意/疑惑/焦虑/愤怒/失望/兴奋",\n'
+      '    "峰值情绪": "客户峰值情绪",\n'
+      '    "结束情绪": "客户结束情绪",\n'
+      '    "情绪趋势": "客户情绪趋势：上升/下降/波动/平稳",\n'
+      '    "情绪强度": "客户情绪强度 1-10",\n'
+      '    "客服情绪": "客服情绪状态：平和/耐心/急躁/专业/疲惫",\n'
+      '    "关键触发点": ["触发客户情绪变化的关键点"],\n'
+      '    "情绪节点": [\n'
       '      {\n'
-      '        "round": "第几轮对话",\n'
-      '        "trigger": "触发事件",\n'
-      '        "customer_emotion": "客户情绪",\n'
-      '        "agent_response": "客服应对"\n'
+      '        "轮次": "第几轮对话",\n'
+      '        "触发事件": "触发事件",\n'
+      '        "客户情绪": "客户情绪",\n'
+      '        "客服应对": "客服应对"\n'
       '      }\n'
-      '    ],\n'
-      '    "emotion_intensity": "情绪强度 1-5"\n'
+      '    ]\n'
       '  },\n'
-      '  "feedback_analysis": {\n'
-      '    "summary": "一句话问题摘要",\n'
-      '    "product_service": "涉及产品/服务",\n'
-      '    "occurrence_time": "问题发生时间描述",\n'
-      '    "frequency": "发生频次：首次/偶尔/经常/频繁",\n'
-      '    "impact_scope": "影响范围：个人/部分用户/所有用户",\n'
-      '    "problem_type": {\n'
-      '      "level1": "一级分类：产品问题/服务问题/物流问题/系统问题/其他",\n'
-      '      "level2": "二级分类",\n'
-      '      "tags": ["技术标签", "业务标签"]\n'
+      '  "问题反馈": {\n'
+      '    "问题摘要": "一句话问题摘要",\n'
+      '    "涉及产品服务": "涉及产品/服务",\n'
+      '    "发生时间": "问题发生时间描述",\n'
+      '    "发生频次": "首次/偶尔/经常/频繁",\n'
+      '    "影响范围": "个人/部分用户/所有用户",\n'
+      '    "问题分类": {\n'
+      '      "一级分类": "产品问题/服务问题/物流问题/系统问题/其他",\n'
+      '      "二级分类": "二级分类",\n'
+      '      "标签": ["技术标签", "业务标签"]\n'
       '    },\n'
-      '    "severity": {\n'
-      '      "level": "严重程度：P0-致命/P1-严重/P2-一般/P3-轻微/P4-建议",\n'
-      '      "score": "严重程度评分1-5",\n'
-      '      "reason": "评级理由",\n'
-      '      "urgency": "紧急程度：立即/24小时内/本周内/不紧急"\n'
+      '    "严重程度": {\n'
+      '      "等级": "P0-致命/P1-严重/P2-一般/P3-轻微/P4-建议",\n'
+      '      "评分": "严重程度评分1-5",\n'
+      '      "评级理由": "评级理由",\n'
+      '      "紧急程度": "立即/24小时内/本周内/不紧急"\n'
       '    },\n'
-      '    "root_cause": {\n'
-      '      "direct_cause": "直接原因",\n'
-      '      "root_cause": "可能根因",\n'
-      '      "trigger_condition": "触发条件",\n'
-      '      "responsibility": "责任归属：客户/公司/第三方/多方/待定"\n'
+      '    "根因分析": {\n'
+      '      "直接原因": "直接原因",\n'
+      '      "可能根因": "可能根因",\n'
+      '      "触发条件": "触发条件",\n'
+      '      "责任归属": "客户/公司/第三方/多方/待定"\n'
       '    },\n'
-      '    "solutions": ["建议解决方案1", "建议解决方案2"]\n'
+      '    "解决方案": ["建议解决方案1", "建议解决方案2"]\n'
       '  },\n'
-      '  "quality": {\n'
-      '    "overall_tone": "整体基调：友好/中性/紧张/对抗",\n'
-      '    "customer_attitude": "客户态度：配合/中立/抵触/激烈",\n'
-      '    "nature": "对话性质：正常咨询/问题反馈/投诉抱怨/争议处理",\n'
-      '    "intensity": {\n'
-      '      "conflict_level": "冲突等级1-5",\n'
-      '      "emotion_intensity": "情绪强度1-5",\n'
-      '      "language_intensity": "语言激烈度1-5",\n'
-      '      "tension_level": "对话紧张度1-5",\n'
-      '      "overall_rating": "整体评级：A-平和/B-轻微摩擦/C-中度争执/D-激烈冲突/E-严重投诉"\n'
+      '  "服务质量": {\n'
+      '    "整体基调": "友好/中性/紧张/对抗",\n'
+      '    "客户态度": "配合/中立/抵触/激烈",\n'
+      '    "客服服务态度": "热情/友好/耐心/专业/冷淡/不耐烦",\n'
+      '    "客服情绪状态": "积极/平和/疲惫/急躁",\n'
+      '    "对话性质": "正常咨询/问题反馈/投诉抱怨/争议处理",\n'
+      '    "强度指标": {\n'
+      '      "冲突等级": "冲突等级1-5",\n'
+      '      "情绪强度": "情绪强度1-5",\n'
+      '      "语言激烈度": "语言激烈度1-5",\n'
+      '      "对话紧张度": "对话紧张度1-5",\n'
+      '      "整体评级": "A-平和/B-轻微摩擦/C-中度争执/D-激烈冲突/E-严重投诉"\n'
       '    },\n'
-      '    "positive_moments": ["正向/表扬 moments"],\n'
-      '    "negative_moments": ["贬义/抱怨 moments"],\n'
-      '    "conflict_moments": ["激烈/冲突 moments"]\n'
+      '    "正向时刻": ["正向/表扬 moments"],\n'
+      '    "负面时刻": ["贬义/抱怨 moments"],\n'
+      '    "冲突时刻": ["激烈/冲突 moments"]\n'
       '  },\n'
-      '  "resolution": {\n'
-      '    "status": "解决状态：完全解决/部分解决/未解决/待跟进/升级处理",\n'
-      '    "customer_satisfied": "true/false",\n'
-      '    "satisfaction_level": "满意度：满意/基本满意/不满意/未表态",\n'
-      '    "secondary_issue": "true/false",\n'
-      '    "unresolved_issues": ["未解决问题清单"],\n'
-      '    "summary": "解决情况摘要"\n'
+      '  "解决情况": {\n'
+      '    "解决状态": "完全解决/部分解决/未解决/待跟进/升级处理",\n'
+      '    "客户是否满意": "true/false",\n'
+      '    "满意度": "满意/基本满意/不满意/未表态",\n'
+      '    "是否有衍生问题": "true/false",\n'
+      '    "未解决问题": ["未解决问题清单"],\n'
+      '    "解决摘要": "解决情况摘要"\n'
       '  },\n'
-      '  "structured": {\n'
-      '    "conversation_type": "对话类型",\n'
-      '    "sentiment_score": "情感得分-1到1",\n'
-      '    "resolution_status": "解决状态",\n'
-      '    "customer_satisfaction": "客户满意度",\n'
-      '    "emotion_tags": ["情绪标签"],\n'
-      '    "conflict_level": "冲突等级：低/中/高",\n'
-      '    "risk_level": "风险等级：低/中/高",\n'
-      '    "follow_up_required": "true/false",\n'
-      '    "escalation_needed": "true/false"\n'
+      '  "综合评估": {\n'
+      '    "对话类型": "对话类型",\n'
+      '    "情感得分": "情感得分-1到1",\n'
+      '    "解决状态": "解决状态",\n'
+      '    "客户满意度": "客户满意度",\n'
+      '    "情绪标签": ["情绪标签"],\n'
+      '    "冲突等级": "低/中/高",\n'
+      '    "风险等级": "低/中/高",\n'
+      '    "是否需要跟进": "true/false",\n'
+      '    "是否需要升级": "true/false"\n'
       '  }\n'
       '}\n'
       r'```'
       '\n\n注意：\n'
-      '1. 如果对话不是反馈/投诉类，feedback_analysis 可以简化，但必须包含基本字段\n'
-      '2. 情绪节点最多列出3-5个关键时刻\n'
-      '3. 所有评分要客观公正，基于对话内容判断\n'
-      '4. 返回必须是合法的JSON格式，不要有注释';
+      '1. 所有 JSON 键名必须使用中文，如"基础信息"、"客户画像"、"情绪分析"等\n'
+      '2. 如果对话不是反馈/投诉类，问题反馈部分可以简化，但必须包含基本字段\n'
+      '3. 情绪节点最多列出3-5个关键时刻\n'
+      '4. 所有评分要客观公正，基于对话内容判断\n'
+      '5. 返回必须是合法的JSON格式，不要有注释';
 
   final Dio _dio = Dio(
     BaseOptions(
@@ -364,36 +370,10 @@ class ConversationAnalysisService {
     String taskId,
   ) {
     try {
-      // 确保所有必需的字段都存在
-      final normalizedResult = _normalizeResult(result);
-
-      return ConversationAnalysis(
-        id: DateTime.now().millisecondsSinceEpoch.toString(),
-        taskId: taskId,
-        info: ConversationInfo.fromJson(
-          Map<String, dynamic>.from(normalizedResult['info'] ?? {}),
-        ),
-        customerProfile: CustomerProfile.fromJson(
-          Map<String, dynamic>.from(normalizedResult['customer_profile'] ?? {}),
-        ),
-        emotionAnalysis: EmotionAnalysis.fromJson(
-          Map<String, dynamic>.from(normalizedResult['emotion_analysis'] ?? {}),
-        ),
-        feedbackAnalysis: normalizedResult['feedback_analysis'] != null
-            ? FeedbackAnalysis.fromJson(
-                Map<String, dynamic>.from(normalizedResult['feedback_analysis']!),
-              )
-            : null,
-        quality: ConversationQuality.fromJson(
-          Map<String, dynamic>.from(normalizedResult['quality'] ?? {}),
-        ),
-        resolution: ResolutionStatus.fromJson(
-          Map<String, dynamic>.from(normalizedResult['resolution'] ?? {}),
-        ),
-        structured: StructuredData.fromJson(
-          Map<String, dynamic>.from(normalizedResult['structured'] ?? {}),
-        ),
-        createdAt: DateTime.now(),
+      return ConversationAnalysis.fromApiResponse(
+        DateTime.now().millisecondsSinceEpoch.toString(),
+        taskId,
+        result,
       );
     } catch (e) {
       throw Exception('解析分析结果失败: $e');
@@ -408,7 +388,10 @@ class ConversationAnalysisService {
       'emotion_analysis': result['emotion_analysis'] ?? {},
       'feedback_analysis': result['feedback_analysis'],
       'quality': result['quality'] ?? {},
+      'management': result['management'],
+      'metrics': result['metrics'],
       'resolution': result['resolution'] ?? {},
+      'insights': result['insights'] ?? {},
       'structured': result['structured'] ?? {},
     };
   }

@@ -1,17 +1,27 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:just_audio/just_audio.dart';
 import '../providers/task_provider.dart';
-import '../providers/resizable_panel_provider.dart';
 import '../services/export_service.dart';
 import '../models/task.dart';
 import '../models/conversation_analysis.dart';
-import '../ui/desktop_subpage_header.dart';
-import '../ui/resizable_divider.dart';
+import '../ui/app_theme.dart';
+import '../ui/markdown_viewer.dart';
+import '../ui/components.dart';
+import '../ui/dynamic_summary_view.dart';
+import '../ui/dynamic_conversation_analysis_view.dart';
 
+/// 任务详情页 - Editorial Tech 风格
+///
+/// 布局：
+/// - 顶部栏：返回、文件名、导出按钮
+/// - 标签栏：转写文本 | 内容摘要 | 对话分析 | 音频
+/// - 内容区：根据标签切换
+/// - 底部：音频播放器（可收起）
 class TaskDetailPage extends ConsumerStatefulWidget {
   final String taskId;
   const TaskDetailPage({super.key, required this.taskId});
@@ -25,22 +35,34 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage> {
   final ExportService _exportService = ExportService();
   Timer? _refreshTimer;
   String? _audioError;
+  bool _isPlayerMinimized = false;
 
   @override
   void initState() {
     super.initState();
-    _loadTask();
+    // 等待第一帧渲染完成后再加载，避免构建期状态更新
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadTask();
+      // 第一帧完成后启动定时器
+      _startRefreshTimer();
+    });
+  }
+
+  void _startRefreshTimer() {
+    _refreshTimer?.cancel();
     _refreshTimer = Timer.periodic(const Duration(seconds: 2), (_) {
       final task = ref.read(currentTaskProvider).value;
       if (task == null) return;
-      if (task.status == TaskStatus.pending || task.status == TaskStatus.processing) {
+      if (task.status == TaskStatus.pending ||
+          task.status == TaskStatus.processing) {
         ref.read(currentTaskProvider.notifier).refresh();
       }
     });
   }
 
   Future<void> _loadTask() async {
-    await ref.read(currentTaskProvider.notifier).loadTask(widget.taskId);
+    // 强制刷新，确保获取最新状态
+    await ref.read(currentTaskProvider.notifier).loadTask(widget.taskId, keepCurrent: false);
   }
 
   Future<void> _loadAudio(String? path) async {
@@ -68,249 +90,219 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage> {
   Widget build(BuildContext context) {
     final taskAsync = ref.watch(currentTaskProvider);
     final task = taskAsync.value;
+
     return Scaffold(
-      backgroundColor: Colors.white,
-      body: Stack(
+      backgroundColor: AppTheme.gray50,
+      body: Column(
         children: [
-          Column(
-            children: [
-              _DetailTopBar(
-                taskAsync: taskAsync,
-                exportEnabled: task != null,
-                onExport: (format) => _handleExport(task, format),
-                onOpenExportMenu: () => _openExportMenu(task),
-              ),
-              Expanded(
-                child: taskAsync.when(
-                  data: (task) {
-                    if (task == null) {
-                      return _EmptyState(
-                        title: '任务不存在',
-                        subtitle: '任务可能已被删除或尚未创建完成。',
-                        onRetry: _loadTask,
-                      );
-                    }
-                    _loadAudio(task.filePath);
-                    return _DetailBody(task: task, audioError: _audioError);
-                  },
-                  loading: () => const _EmptyState(
-                    title: '加载中',
-                    subtitle: '正在获取任务详情…',
-                  ),
-                  error: (e, _) => _EmptyState(
-                    title: '加载失败',
-                    subtitle: e.toString(),
-                    onRetry: _loadTask,
-                  ),
-                ),
-              ),
-            ],
+          // 顶部栏
+          _DetailTopBar(
+            taskAsync: taskAsync,
+            onBack: () => context.pop(),
           ),
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 24,
-            child: _AudioPlayerBar(player: _player),
+
+          // 主体内容
+          Expanded(
+            child: taskAsync.when(
+              data: (task) {
+                if (task == null) {
+                  return _EmptyState(
+                    icon: Icons.error_outline,
+                    title: '任务不存在',
+                    subtitle: '任务可能已被删除或尚未创建完成',
+                    onAction: _loadTask,
+                    actionLabel: '重试',
+                  );
+                }
+                _loadAudio(task.filePath);
+                return _DetailBody(
+                  task: task,
+                  audioError: _audioError,
+                  player: _player,
+                );
+              },
+              loading: () => const _EmptyState(
+                icon: Icons.hourglass_empty,
+                title: '加载中',
+                subtitle: '正在获取任务详情…',
+              ),
+              error: (e, _) => _EmptyState(
+                icon: Icons.error_outline,
+                title: '加载失败',
+                subtitle: e.toString(),
+                onAction: _loadTask,
+                actionLabel: '重试',
+              ),
+            ),
           ),
+
+          // 音频播放器
+          if (task != null && task.status == TaskStatus.completed)
+            _AudioPlayerBar(
+              player: _player,
+              isMinimized: _isPlayerMinimized,
+              onToggleMinimize: () {
+                setState(() => _isPlayerMinimized = !_isPlayerMinimized);
+              },
+            ),
         ],
       ),
     );
   }
-
-  Future<void> _handleExport(Task? task, String format) async {
-    if (task == null) {
-      _showMessage('任务还在加载，暂时无法导出');
-      return;
-    }
-    if (task.status == TaskStatus.pending || task.status == TaskStatus.processing) {
-      _showMessage('任务仍在处理中，请稍后导出');
-      return;
-    }
-    final hasText = (task.transcription?.fullText ?? '').trim().isNotEmpty;
-    if (!hasText) {
-      _showMessage('当前没有可导出的转写内容');
-      return;
-    }
-    if (format == 'pdf') await _exportService.exportPdf(task);
-    if (format == 'txt') await _exportService.exportTxt(task);
-    if (format == 'json') await _exportService.exportJson(task);
-  }
-
-  Future<void> _openExportMenu(Task? task) async {
-    await showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (context) {
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _ExportSheetItem(
-                  label: '导出为 PDF',
-                  onTap: () {
-                    Navigator.of(context).pop();
-                    _handleExport(task, 'pdf');
-                  },
-                ),
-                _ExportSheetItem(
-                  label: '导出为 TXT',
-                  onTap: () {
-                    Navigator.of(context).pop();
-                    _handleExport(task, 'txt');
-                  },
-                ),
-                _ExportSheetItem(
-                  label: '导出为 JSON',
-                  onTap: () {
-                    Navigator.of(context).pop();
-                    _handleExport(task, 'json');
-                  },
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  void _showMessage(String message) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
-  }
 }
 
+/// 顶部栏
 class _DetailTopBar extends StatelessWidget {
   final AsyncValue<Task?> taskAsync;
-  final ValueChanged<String> onExport;
-  final VoidCallback onOpenExportMenu;
-  final bool exportEnabled;
+  final VoidCallback onBack;
 
   const _DetailTopBar({
     required this.taskAsync,
-    required this.onExport,
-    required this.onOpenExportMenu,
-    required this.exportEnabled,
+    required this.onBack,
   });
 
   @override
   Widget build(BuildContext context) {
     final task = taskAsync.value;
+
     return Container(
-      height: 64,
-      padding: EdgeInsets.only(
-        left: desktopWindowInsetLeft(),
-        right: desktopWindowInsetRight(),
-      ),
+      height: 72,
+      padding: const EdgeInsets.symmetric(horizontal: 24),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.9),
-        border: const Border(bottom: BorderSide(color: Color(0xFFF1F5F9))),
+        color: Colors.white,
+        border: Border(bottom: BorderSide(color: AppTheme.gray200)),
+        boxShadow: [AppShadows.sm],
       ),
       child: Row(
         children: [
-          InkWell(
-            onTap: () {
-              final navigator = Navigator.of(context);
-              if (navigator.canPop()) {
-                navigator.pop();
-              } else {
-                context.go('/');
-              }
-            },
-            child: Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                color: const Color(0xFFF8FAFC),
-                borderRadius: BorderRadius.circular(999),
-              ),
-              child: const Icon(Icons.arrow_back, size: 18, color: Color(0xFF64748B)),
-            ),
+          // 返回按钮
+          _IconButton(
+            icon: Icons.arrow_back,
+            onTap: onBack,
           ),
-          const SizedBox(width: 12),
-          Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(task?.fileName ?? '转写详情', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800)),
-              const SizedBox(height: 4),
-              Text(
-                task?.createdAt != null ? '录制于 ${_formatDate(task!.createdAt)}' : '加载中',
-                style: const TextStyle(fontSize: 10, color: Color(0xFF94A3B8), letterSpacing: 1.4, fontWeight: FontWeight.w700),
-              ),
-            ],
-          ),
-          const Spacer(),
-          Container(
-            padding: const EdgeInsets.all(4),
-            decoration: BoxDecoration(
-              color: const Color(0xFFF8FAFC),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: const Color(0xFFF1F5F9)),
-            ),
-            child: Row(
+          const SizedBox(width: 16),
+
+          // 文件信息
+          Expanded(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _MiniExportButton(
-                  label: 'PDF',
-                  enabled: exportEnabled,
-                  onTap: () => onExport('pdf'),
-                ),
-                _MiniExportButton(
-                  label: 'TXT',
-                  enabled: exportEnabled,
-                  onTap: () => onExport('txt'),
-                ),
-                _MiniExportButton(
-                  label: 'JSON',
-                  enabled: exportEnabled,
-                  onTap: () => onExport('json'),
+                if (task != null)
+                  FileNameDisplay(
+                    fileName: task.fileName,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.gray900,
+                    ),
+                    showCopyButton: true,
+                  )
+                else
+                  const Text(
+                    '加载中...',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.gray900,
+                    ),
+                  ),
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    if (task != null) ...[
+                      _StatusBadge(status: task.status),
+                      const SizedBox(width: 12),
+                      Text(
+                        '创建于 ${_formatDate(task.createdAt)}',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: AppTheme.gray500,
+                        ),
+                      ),
+                    ] else
+                      const Text(
+                        '加载中...',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: AppTheme.gray400,
+                        ),
+                      ),
+                  ],
                 ),
               ],
             ),
           ),
-          const SizedBox(width: 12),
-          InkWell(
-            onTap: exportEnabled ? onOpenExportMenu : null,
-            borderRadius: BorderRadius.circular(10),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-              decoration: BoxDecoration(
-                color: exportEnabled ? const Color(0xFF256AF4) : const Color(0xFFCBD5F5),
-                borderRadius: BorderRadius.circular(10),
-                boxShadow: [
-                  BoxShadow(
-                    color: const Color(0xFF256AF4).withValues(alpha: 0.3),
-                    blurRadius: 10,
-                    offset: const Offset(0, 6),
-                  ),
-                ],
-              ),
-              child: Row(
-                children: const [
-                  Icon(Icons.ios_share, size: 14, color: Colors.white),
-                  SizedBox(width: 6),
-                  Text('导出', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: Colors.white)),
-                ],
-              ),
+
+          // 导出按钮
+          if (task != null && task.status == TaskStatus.completed) ...[
+            _IconButton(
+              icon: Icons.download,
+              onTap: () => _showExportMenu(context, task),
+            ),
+            const SizedBox(width: 8),
+          ],
+        ],
+      ),
+    );
+  }
+
+  String _formatDate(DateTime date) {
+    return '${date.month}/${date.day} ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
+  }
+
+  void _showExportMenu(BuildContext context, Task task) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => _ExportMenu(task: task),
+    );
+  }
+}
+
+/// 状态徽章
+class _StatusBadge extends StatelessWidget {
+  final TaskStatus status;
+
+  const _StatusBadge({required this.status});
+
+  @override
+  Widget build(BuildContext context) {
+    final (label, color) = switch (status) {
+      TaskStatus.pending => ('待处理', AppTheme.gray600),
+      TaskStatus.processing => ('处理中', AppTheme.primary600),
+      TaskStatus.completed => ('已完成', AppTheme.success),
+      TaskStatus.failed => ('失败', AppTheme.error),
+    };
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 6,
+            height: 6,
+            decoration: BoxDecoration(
+              color: color,
+              shape: BoxShape.circle,
             ),
           ),
-          const SizedBox(width: 12),
-          Container(
-            width: 32,
-            height: 32,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(999),
-              border: Border.all(color: const Color(0xFF256AF4).withValues(alpha: 0.2), width: 2),
-              color: const Color(0xFFE2E8F0),
+          const SizedBox(width: 5),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: color,
             ),
-            child: const Icon(Icons.person, size: 16, color: Color(0xFF64748B)),
           ),
         ],
       ),
@@ -318,83 +310,207 @@ class _DetailTopBar extends StatelessWidget {
   }
 }
 
-class _MiniExportButton extends StatelessWidget {
-  final String label;
+/// 图标按钮
+class _IconButton extends StatelessWidget {
+  final IconData icon;
   final VoidCallback onTap;
-  final bool enabled;
-  const _MiniExportButton({
-    required this.label,
-    required this.onTap,
-    this.enabled = true,
-  });
 
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: enabled ? onTap : null,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: 10,
-            fontWeight: FontWeight.w700,
-            color: enabled ? const Color(0xFF94A3B8) : const Color(0xFFCBD5F5),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _ExportSheetItem extends StatelessWidget {
-  final String label;
-  final VoidCallback onTap;
-  const _ExportSheetItem({required this.label, required this.onTap});
+  const _IconButton({required this.icon, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
     return InkWell(
       onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
       child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+        width: 40,
+        height: 40,
         decoration: BoxDecoration(
-          border: Border(
-            bottom: BorderSide(color: Colors.grey.withOpacity(0.15)),
-          ),
+          color: AppTheme.gray50,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: AppTheme.gray200),
         ),
-        child: Text(
-          label,
-          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-        ),
+        child: Icon(icon, size: 20, color: AppTheme.gray600),
       ),
     );
   }
 }
 
-class _EmptyState extends StatelessWidget {
-  final String title;
-  final String subtitle;
-  final VoidCallback? onRetry;
-  const _EmptyState({required this.title, required this.subtitle, this.onRetry});
+/// 导出菜单
+class _ExportMenu extends StatefulWidget {
+  final Task task;
+
+  const _ExportMenu({required this.task});
+
+  @override
+  State<_ExportMenu> createState() => _ExportMenuState();
+}
+
+class _ExportMenuState extends State<_ExportMenu> {
+  bool _isExporting = false;
+  String _exportStatus = '';
+
+  Future<void> _exportPdf(BuildContext context) async {
+    setState(() {
+      _isExporting = true;
+      _exportStatus = '正在生成 PDF...';
+    });
+
+    try {
+      final exportService = ExportService();
+      // 如果有对话分析，导出分析报告；否则导出基础报告
+      if (widget.task.conversationAnalysis != null) {
+        await exportService.exportConversationAnalysisPdf(
+          widget.task,
+          widget.task.conversationAnalysis!,
+        );
+      } else {
+        await exportService.exportPdf(widget.task);
+      }
+
+      if (mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('PDF 导出成功')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isExporting = false;
+          _exportStatus = '导出失败: $e';
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('导出失败: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _exportTxt(BuildContext context) async {
+    setState(() {
+      _isExporting = true;
+      _exportStatus = '正在导出 TXT...';
+    });
+
+    try {
+      final exportService = ExportService();
+      await exportService.exportTxt(widget.task);
+
+      if (mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('TXT 导出成功')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isExporting = false;
+          _exportStatus = '导出失败: $e';
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('导出失败: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _exportJson(BuildContext context) async {
+    setState(() {
+      _isExporting = true;
+      _exportStatus = '正在导出 JSON...';
+    });
+
+    try {
+      final exportService = ExportService();
+      await exportService.exportJson(widget.task);
+
+      if (mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('JSON 导出成功')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isExporting = false;
+          _exportStatus = '导出失败: $e';
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('导出失败: $e')),
+        );
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 320),
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.all(20),
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-            const SizedBox(height: 8),
-            Text(subtitle, textAlign: TextAlign.center, style: const TextStyle(color: Color(0xFF64748B))),
-            if (onRetry != null) ...[
-              const SizedBox(height: 16),
-              ElevatedButton(
-                onPressed: onRetry,
-                child: const Text('重试'),
+            const Text(
+              '导出内容',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              '选择要导出的格式',
+              style: TextStyle(
+                fontSize: 14,
+                color: AppTheme.gray500,
+              ),
+            ),
+            const SizedBox(height: 20),
+            if (_isExporting) ...[
+              Center(
+                child: Column(
+                  children: [
+                    const CircularProgressIndicator(),
+                    const SizedBox(height: 12),
+                    Text(
+                      _exportStatus,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        color: AppTheme.gray600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ] else ...[
+              _ExportOption(
+                icon: Icons.picture_as_pdf,
+                label: 'PDF 文档',
+                subtitle: widget.task.conversationAnalysis != null
+                    ? '包含对话分析报告'
+                    : '适合打印和分享',
+                color: AppTheme.error,
+                onTap: () => _exportPdf(context),
+              ),
+              const SizedBox(height: 12),
+              _ExportOption(
+                icon: Icons.text_snippet,
+                label: 'TXT 文本',
+                subtitle: '纯文本格式',
+                color: AppTheme.gray600,
+                onTap: () => _exportTxt(context),
+              ),
+              const SizedBox(height: 12),
+              _ExportOption(
+                icon: Icons.code,
+                label: 'JSON 数据',
+                subtitle: '包含完整结构化数据',
+                color: AppTheme.primary600,
+                onTap: () => _exportJson(context),
               ),
             ],
           ],
@@ -404,629 +520,909 @@ class _EmptyState extends StatelessWidget {
   }
 }
 
-class _DetailBody extends ConsumerWidget {
-  final Task task;
-  final String? audioError;
-  const _DetailBody({required this.task, this.audioError});
+/// 导出选项
+class _ExportOption extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String subtitle;
+  final Color color;
+  final VoidCallback onTap;
 
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return ResizableSplitLayout(
-      firstPanel: _TranscriptPanel(task: task),
-      secondPanel: Container(
-        decoration: BoxDecoration(
-          border: Border(
-            left: BorderSide(color: Theme.of(context).dividerColor),
-          ),
-          color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.4),
-        ),
-        child: _InsightsPanel(audioError: audioError),
-      ),
-      initialSecondWidth: 320,
-      widthProvider: detailInsightsWidthProvider,
-      minSecondWidth: kMinPanelWidth,
-      maxSecondWidthRatio: kMaxPanelWidthRatio,
-    );
-  }
-}
-
-class _TranscriptPanel extends StatelessWidget {
-  final Task task;
-  const _TranscriptPanel({required this.task});
+  const _ExportOption({
+    required this.icon,
+    required this.label,
+    required this.subtitle,
+    required this.color,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final segments = task.transcription?.segments ?? [];
-    if (segments.isEmpty) {
-      return const Center(child: Text('暂无转写内容'));
-    }
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(32, 32, 32, 160),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: segments.map((s) {
-          return _TranscriptSegment(
-            initials: 'SP',
-            name: 'Speaker',
-            time: _formatTime(s.startTime),
-            color: const Color(0xFF256AF4),
-            text: s.text,
-          );
-        }).toList(),
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: AppTheme.gray50,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppTheme.gray200),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(icon, color: color),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: AppTheme.gray500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(
+              Icons.arrow_forward_ios,
+              size: 16,
+              color: AppTheme.gray400,
+            ),
+          ],
+        ),
       ),
     );
   }
 }
 
-class _TranscriptSegment extends StatelessWidget {
-  final String initials;
-  final String name;
-  final String time;
-  final Color color;
-  final String text;
+/// 空状态
+class _EmptyState extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback? onAction;
+  final String? actionLabel;
 
-  const _TranscriptSegment({
-    required this.initials,
-    required this.name,
-    required this.time,
-    required this.color,
+  const _EmptyState({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    this.onAction,
+    this.actionLabel,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icon, size: 48, color: AppTheme.gray400),
+          const SizedBox(height: 16),
+          Text(
+            title,
+            style: const TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            subtitle,
+            style: const TextStyle(
+              fontSize: 14,
+              color: AppTheme.gray500,
+            ),
+          ),
+          if (onAction != null && actionLabel != null) ...[
+            const SizedBox(height: 24),
+            FilledButton(
+              onPressed: onAction,
+              child: Text(actionLabel!),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// 详情主体
+class _DetailBody extends StatefulWidget {
+  final Task task;
+  final String? audioError;
+  final AudioPlayer player;
+
+  const _DetailBody({
+    required this.task,
+    this.audioError,
+    required this.player,
+  });
+
+  @override
+  State<_DetailBody> createState() => _DetailBodyState();
+}
+
+class _DetailBodyState extends State<_DetailBody>
+    with SingleTickerProviderStateMixin {
+  late TabController _tabController;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 4, vsync: this);
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        // 标签栏
+        Container(
+          color: Colors.white,
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: TabBar(
+            controller: _tabController,
+            labelColor: AppTheme.primary600,
+            unselectedLabelColor: AppTheme.gray500,
+            indicatorColor: AppTheme.primary600,
+            indicatorWeight: 2,
+            tabs: const [
+              Tab(text: '转写文本'),
+              Tab(text: '内容摘要'),
+              Tab(text: '对话分析'),
+              Tab(text: '音频'),
+            ],
+          ),
+        ),
+
+        // 标签内容
+        Expanded(
+          child: TabBarView(
+            controller: _tabController,
+            children: [
+              _TranscriptView(task: widget.task, player: widget.player),
+              _SummaryView(task: widget.task),
+              _AnalysisView(task: widget.task),
+              _AudioView(task: widget.task, player: widget.player),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// 转写文本视图
+class _TranscriptView extends StatefulWidget {
+  final Task task;
+  final AudioPlayer player;
+
+  const _TranscriptView({required this.task, required this.player});
+
+  @override
+  State<_TranscriptView> createState() => _TranscriptViewState();
+}
+
+class _TranscriptViewState extends State<_TranscriptView> {
+  String _searchQuery = '';
+  final ScrollController _scrollController = ScrollController();
+  int _currentMatchIndex = 0;
+  List<int> _matchIndices = [];
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _updateSearch(String query) {
+    setState(() {
+      _searchQuery = query;
+      _currentMatchIndex = 0;
+    });
+
+    // 延迟执行滚动，等待列表构建完成
+    if (query.isNotEmpty) {
+      Future.delayed(const Duration(milliseconds: 100), () {
+        _scrollToFirstMatch();
+      });
+    }
+  }
+
+  void _scrollToFirstMatch() {
+    if (_matchIndices.isEmpty) return;
+
+    final targetIndex = _matchIndices[_currentMatchIndex];
+    final itemHeight = 80.0; // 估算每项高度
+    final offset = targetIndex * itemHeight;
+
+    _scrollController.animateTo(
+      offset.clamp(0.0, _scrollController.position.maxScrollExtent),
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeInOut,
+    );
+  }
+
+  void _navigateToNextMatch() {
+    if (_matchIndices.isEmpty) return;
+    setState(() {
+      _currentMatchIndex = (_currentMatchIndex + 1) % _matchIndices.length;
+    });
+    _scrollToFirstMatch();
+  }
+
+  void _navigateToPreviousMatch() {
+    if (_matchIndices.isEmpty) return;
+    setState(() {
+      _currentMatchIndex = (_currentMatchIndex - 1 + _matchIndices.length) % _matchIndices.length;
+    });
+    _scrollToFirstMatch();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final segments = widget.task.transcription?.segments ?? [];
+    final fullText = widget.task.transcription?.fullText ?? '';
+
+    // 过滤片段
+    final filteredSegments = _searchQuery.isEmpty
+        ? segments
+        : segments.where((s) =>
+            s.text.toLowerCase().contains(_searchQuery.toLowerCase())).toList();
+
+    // 更新匹配索引
+    _matchIndices = [];
+    if (_searchQuery.isNotEmpty) {
+      for (int i = 0; i < segments.length; i++) {
+        if (segments[i].text.toLowerCase().contains(_searchQuery.toLowerCase())) {
+          _matchIndices.add(i);
+        }
+      }
+    }
+
+    if (segments.isEmpty) {
+      return const _EmptyState(
+        icon: Icons.text_snippet_outlined,
+        title: '暂无转写内容',
+        subtitle: '转写结果将在此显示',
+      );
+    }
+
+    return Column(
+      children: [
+        // 工具栏
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            border: Border(bottom: BorderSide(color: AppTheme.gray200)),
+          ),
+          child: Row(
+            children: [
+              // 搜索框
+              Expanded(
+                child: Container(
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: AppTheme.gray50,
+                    borderRadius: BorderRadius.circular(AppRadius.lg),
+                  ),
+                  child: TextField(
+                    onChanged: _updateSearch,
+                    decoration: InputDecoration(
+                      hintText: '搜索转写文本...',
+                      hintStyle: TextStyle(color: AppTheme.gray400, fontSize: 13),
+                      prefixIcon: Icon(Icons.search, color: AppTheme.gray400, size: 18),
+                      border: InputBorder.none,
+                      contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+
+              // 搜索结果导航
+              if (_searchQuery.isNotEmpty && _matchIndices.isNotEmpty) ...[
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: AppTheme.primary50,
+                    borderRadius: BorderRadius.circular(AppRadius.md),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      InkWell(
+                        onTap: _navigateToPreviousMatch,
+                        borderRadius: BorderRadius.circular(4),
+                        child: Icon(Icons.chevron_left, size: 18, color: AppTheme.primary600),
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        '${_currentMatchIndex + 1}/${_matchIndices.length}',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.primary600,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      InkWell(
+                        onTap: _navigateToNextMatch,
+                        borderRadius: BorderRadius.circular(4),
+                        child: Icon(Icons.chevron_right, size: 18, color: AppTheme.primary600),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+              ] else if (_searchQuery.isNotEmpty) ...[
+                Text(
+                  '无匹配',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: AppTheme.gray500,
+                  ),
+                ),
+                const SizedBox(width: 12),
+              ],
+
+              // 统计信息
+              Text(
+                '${filteredSegments.length} 片段 · ${fullText.length} 字',
+                style: const TextStyle(
+                  fontSize: 13,
+                  color: AppTheme.gray500,
+                ),
+              ),
+              const SizedBox(width: 12),
+
+              // 复制全部
+              _ToolbarButton(
+                icon: Icons.copy,
+                label: '复制全部',
+                onTap: () {
+                  Clipboard.setData(ClipboardData(text: fullText));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('已复制全部转写文本'),
+                      duration: Duration(seconds: 2),
+                    ),
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+
+        // 转写列表
+        Expanded(
+          child: ListView.builder(
+            controller: _scrollController,
+            padding: const EdgeInsets.all(24),
+            itemCount: filteredSegments.length,
+            itemBuilder: (context, index) {
+              final segment = filteredSegments[index];
+              final originalIndex = segments.indexOf(segment);
+              final isHighlighted = _searchQuery.isNotEmpty &&
+                  segment.text.toLowerCase().contains(_searchQuery.toLowerCase());
+              final isCurrentMatch = isHighlighted &&
+                  _matchIndices.isNotEmpty &&
+                  originalIndex == _matchIndices[_currentMatchIndex];
+
+              return _TranscriptItem(
+                text: segment.text,
+                startTime: Duration(milliseconds: (segment.startTime * 1000).toInt()),
+                endTime: Duration(milliseconds: (segment.endTime * 1000).toInt()),
+                isAlternate: originalIndex % 2 == 1,
+                isHighlighted: isHighlighted,
+                isCurrentMatch: isCurrentMatch,
+                searchQuery: _searchQuery,
+                onTap: () {
+                  widget.player.seek(Duration(milliseconds: (segment.startTime * 1000).toInt()));
+                },
+                onCopy: () {
+                  Clipboard.setData(ClipboardData(text: segment.text));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('已复制片段'),
+                      duration: Duration(seconds: 1),
+                    ),
+                  );
+                },
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// 转写片段
+class _TranscriptItem extends StatelessWidget {
+  final String text;
+  final Duration startTime;
+  final Duration endTime;
+  final bool isAlternate;
+  final bool isHighlighted;
+  final bool isCurrentMatch;
+  final String searchQuery;
+  final VoidCallback onTap;
+  final VoidCallback onCopy;
+
+  const _TranscriptItem({
     required this.text,
+    required this.startTime,
+    required this.endTime,
+    required this.isAlternate,
+    this.isHighlighted = false,
+    this.isCurrentMatch = false,
+    this.searchQuery = '',
+    required this.onTap,
+    required this.onCopy,
   });
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 28),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 28,
-                height: 28,
-                decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.15),
-                  shape: BoxShape.circle,
-                ),
-                child: Center(
-                  child: Text(
-                    initials,
-                    style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: color),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Text(name, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF64748B))),
-              const SizedBox(width: 10),
-              Text(time, style: const TextStyle(fontSize: 10, color: Color(0xFFCBD5F5), fontFamily: 'monospace')),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Text(
-            text,
-            style: const TextStyle(
-              fontSize: 16,
-              height: 1.6,
-              color: Color(0xFF334155),
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ],
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: isCurrentMatch ? const EdgeInsets.all(8) : null,
+      decoration: BoxDecoration(
+        color: isCurrentMatch ? AppTheme.warning50 : null,
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        border: isCurrentMatch
+            ? Border.all(color: AppTheme.warning.withOpacity(0.5))
+            : null,
       ),
-    );
-  }
-}
-
-class _InsightsPanel extends ConsumerWidget {
-  final String? audioError;
-  const _InsightsPanel({this.audioError});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final task = ref.watch(currentTaskProvider).value;
-    final summary = task?.summary;
-    return Container(
-      decoration: const BoxDecoration(
-        border: Border(left: BorderSide(color: Color(0xFFF1F5F9))),
-        color: Color(0xFFF8FAFC),
-      ),
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Column(
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: const [
-                Text('AI 洞察', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: Color(0xFF94A3B8), letterSpacing: 2.2)),
-                Icon(Icons.auto_awesome, size: 18, color: Color(0xFF256AF4)),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: const [
-                Text('摘要', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800)),
-                Text('重新生成', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: Color(0xFF256AF4))),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: const Color(0xFF256AF4).withOpacity(0.06),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: const Color(0xFF256AF4).withOpacity(0.12)),
-              ),
-              child: Text(
-                summary?.medium ?? '暂无摘要内容',
-                style: const TextStyle(fontSize: 11, height: 1.5, color: Color(0xFF64748B), fontWeight: FontWeight.w600),
-              ),
-            ),
-            const SizedBox(height: 20),
-            if (audioError != null) ...[
-              const Text('播放状态', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800)),
-              const SizedBox(height: 8),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFFEF2F2),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: const Color(0xFFFECACA)),
-                ),
-                child: Text(audioError!, style: const TextStyle(fontSize: 11, color: Color(0xFFB91C1C))),
-              ),
-              const SizedBox(height: 20),
-            ],
-            const Text('要点', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800)),
-            const SizedBox(height: 12),
-            ...(summary?.keyPoints ?? ['暂无要点']).map((item) => _InsightBullet(color: const Color(0xFF3B82F6), text: item)).toList(),
-            const SizedBox(height: 20),
-            const Text('关键词', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800)),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: (summary?.keywords ?? ['暂无关键词'])
-                  .map((k) => _KeywordChip(label: k))
-                  .toList(),
-            ),
-            const SizedBox(height: 24),
-            const Divider(height: 1, color: Color(0xFFE2E8F0)),
-            const SizedBox(height: 24),
-            if (task != null) _ConversationAnalysisPanel(task: task),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _InsightBullet extends StatelessWidget {
-  final Color color;
-  final String text;
-  const _InsightBullet({required this.color, required this.text});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 6,
-            height: 6,
-            margin: const EdgeInsets.only(top: 6),
-            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(text, style: const TextStyle(fontSize: 11, color: Color(0xFF64748B), height: 1.4, fontWeight: FontWeight.w600)),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _KeywordChip extends StatelessWidget {
-  final String label;
-  const _KeywordChip({required this.label});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
-      ),
-      child: Text(
-        label,
-        style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w800, color: Color(0xFF64748B), letterSpacing: 1.0),
-      ),
-    );
-  }
-}
-
-class _ConversationAnalysisPanel extends StatelessWidget {
-  final Task task;
-  const _ConversationAnalysisPanel({required this.task});
-
-  @override
-  Widget build(BuildContext context) {
-    final analysis = task.conversationAnalysis;
-    final isProcessing = task.status == TaskStatus.processing && task.enableConversationAnalysis;
-
-    if (!task.enableConversationAnalysis) {
-      return const SizedBox.shrink();
-    }
-
-    if (isProcessing) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: const [
-              Icon(Icons.psychology, size: 16, color: Color(0xFF6366F1)),
-              SizedBox(width: 8),
-              Text('客服对话分析', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800)),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: const Color(0xFFF1F5F9),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: const Color(0xFFE2E8F0)),
-            ),
-            child: Row(
-              children: [
-                const SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF6366F1)),
-                ),
-                const SizedBox(width: 12),
-                const Text('正在分析对话内容...', style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
-              ],
-            ),
-          ),
-        ],
-      );
-    }
-
-    if (analysis == null) {
-      return const SizedBox.shrink();
-    }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            const Icon(Icons.psychology, size: 16, color: Color(0xFF6366F1)),
-            const SizedBox(width: 8),
-            const Text('客服对话分析', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800)),
-            const Spacer(),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: _getTypeColor(analysis.info.type).withOpacity(0.1),
-                borderRadius: BorderRadius.circular(6),
-                border: Border.all(color: _getTypeColor(analysis.info.type).withOpacity(0.3)),
-              ),
-              child: Text(
-                analysis.info.type,
-                style: TextStyle(
-                  fontSize: 9,
-                  fontWeight: FontWeight.w800,
-                  color: _getTypeColor(analysis.info.type),
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 16),
-
-        // 客户画像
-        if (analysis.customerProfile.customerType != '未知') ...[
-          _buildSectionTitle('客户画像'),
-          const SizedBox(height: 8),
-          _buildInfoCard([
-            _buildInfoRow('类型', analysis.customerProfile.customerType),
-            if (analysis.customerProfile.coreDemand.isNotEmpty)
-              _buildInfoRow('核心诉求', analysis.customerProfile.coreDemand),
-            if (analysis.customerProfile.expectedSolution.isNotEmpty)
-              _buildInfoRow('期望方案', analysis.customerProfile.expectedSolution),
-          ]),
-          const SizedBox(height: 16),
-        ],
-
-        // 情绪分析
-        _buildSectionTitle('情绪分析'),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            _buildEmotionBadge('初始', analysis.emotionAnalysis.initialEmotion),
-            const SizedBox(width: 8),
-            const Icon(Icons.arrow_forward, size: 12, color: Color(0xFFCBD5E1)),
-            const SizedBox(width: 8),
-            _buildEmotionBadge('峰值', analysis.emotionAnalysis.peakEmotion),
-            const SizedBox(width: 8),
-            const Icon(Icons.arrow_forward, size: 12, color: Color(0xFFCBD5E1)),
-            const SizedBox(width: 8),
-            _buildEmotionBadge('结束', analysis.emotionAnalysis.finalEmotion),
-          ],
-        ),
-        if (analysis.emotionAnalysis.emotionNodes.isNotEmpty) ...[
-          const SizedBox(height: 8),
-          ...analysis.emotionAnalysis.emotionNodes.take(3).map((node) => _buildEmotionNode(node)),
-        ],
-        const SizedBox(height: 16),
-
-        // 问题反馈
-        if (analysis.feedbackAnalysis?.summary.isNotEmpty == true) ...[
-          _buildSectionTitle('问题反馈'),
-          const SizedBox(height: 8),
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: const Color(0xFFFEF3C7),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: const Color(0xFFFDE68A)),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: _hexToColor(analysis.feedbackAnalysis!.severity.color),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Text(
-                        analysis.feedbackAnalysis!.severity.level,
-                        style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w800, color: Colors.white),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      analysis.feedbackAnalysis!.problemType.level1,
-                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF92400E)),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  analysis.feedbackAnalysis!.summary,
-                  style: const TextStyle(fontSize: 11, color: Color(0xFF78350F), height: 1.4),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-        ],
-
-        // 对话质量 - 使用激烈程度评分
-        _buildSectionTitle('对话质量'),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            _buildQualityScore('冲突', analysis.quality.intensity.conflictLevel),
-            const SizedBox(width: 12),
-            _buildQualityScore('情绪', analysis.quality.intensity.emotionIntensity),
-            const SizedBox(width: 12),
-            _buildQualityScore('语言', analysis.quality.intensity.languageIntensity),
-            const SizedBox(width: 12),
-            _buildQualityScore('紧张', analysis.quality.intensity.tensionLevel),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          decoration: BoxDecoration(
-            color: _hexToColor(analysis.quality.intensity.color).withOpacity(0.1),
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: _hexToColor(analysis.quality.intensity.color).withOpacity(0.3)),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text(
-                '综合评级: ',
-                style: TextStyle(fontSize: 10, color: Color(0xFF64748B)),
-              ),
-              Text(
-                analysis.quality.intensity.overallRating,
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w800,
-                  color: _hexToColor(analysis.quality.intensity.color),
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 16),
-
-        // 解决状态
-        _buildSectionTitle('处理结果'),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(
-                color: _hexToColor(analysis.resolution.color).withOpacity(0.1),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: _hexToColor(analysis.resolution.color).withOpacity(0.3),
-                ),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
+            // 时间戳
+            SizedBox(
+              width: 56,
+              child: Column(
                 children: [
-                  Icon(
-                    analysis.resolution.customerSatisfied ? Icons.check_circle : Icons.pending,
-                    size: 14,
-                    color: _hexToColor(analysis.resolution.color),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: isCurrentMatch
+                          ? AppTheme.warning.withOpacity(0.2)
+                          : AppTheme.gray100,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      _formatTime(startTime),
+                      style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.gray600,
+                        fontFamily: 'JetBrains Mono',
+                      ),
+                    ),
                   ),
-                  const SizedBox(width: 6),
+                  const SizedBox(height: 2),
                   Text(
-                    analysis.resolution.status,
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      color: _hexToColor(analysis.resolution.color),
+                    _formatTime(endTime),
+                    style: const TextStyle(
+                      fontSize: 10,
+                      color: AppTheme.gray400,
+                      fontFamily: 'JetBrains Mono',
                     ),
                   ),
                 ],
               ),
             ),
             const SizedBox(width: 12),
-            if (analysis.info.durationMinutes > 0)
-              Text(
-                '时长 ${analysis.info.durationMinutes} 分钟',
-                style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+
+            // 说话人标识
+            Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                color: isAlternate
+                    ? AppTheme.accent600.withOpacity(0.1)
+                    : AppTheme.primary600.withOpacity(0.1),
+                shape: BoxShape.circle,
               ),
+              child: Center(
+                child: Text(
+                  isAlternate ? 'B' : 'A',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: isAlternate ? AppTheme.accent600 : AppTheme.primary600,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+
+            // 文本内容
+            Expanded(
+              child: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: isAlternate ? AppTheme.gray50 : Colors.white,
+                  borderRadius: BorderRadius.circular(AppRadius.lg),
+                  border: Border.all(color: AppTheme.gray200),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: _buildHighlightedText(),
+                    ),
+                    const SizedBox(width: 8),
+                    InkWell(
+                      onTap: onCopy,
+                      borderRadius: BorderRadius.circular(4),
+                      child: const Padding(
+                        padding: EdgeInsets.all(4),
+                        child: Icon(
+                          Icons.copy,
+                          size: 14,
+                          color: AppTheme.gray400,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           ],
         ),
-        if (analysis.resolution.summary.isNotEmpty) ...[
-          const SizedBox(height: 8),
-          Text(
-            analysis.resolution.summary,
-            style: const TextStyle(fontSize: 11, color: Color(0xFF64748B), height: 1.4),
+      ),
+    );
+  }
+
+  Widget _buildHighlightedText() {
+    if (searchQuery.isEmpty) {
+      return Text(
+        text,
+        style: const TextStyle(
+          fontSize: 14,
+          height: 1.5,
+          color: AppTheme.gray700,
+        ),
+      );
+    }
+
+    final lowerQuery = searchQuery.toLowerCase();
+    final lowerText = text.toLowerCase();
+    final List<TextSpan> spans = [];
+    int start = 0;
+
+    while (true) {
+      final index = lowerText.indexOf(lowerQuery, start);
+      if (index == -1) {
+        // 添加剩余文本
+        if (start < text.length) {
+          spans.add(TextSpan(
+            text: text.substring(start),
+            style: const TextStyle(
+              fontSize: 14,
+              height: 1.5,
+              color: AppTheme.gray700,
+            ),
+          ));
+        }
+        break;
+      }
+
+      // 添加匹配前的文本
+      if (index > start) {
+        spans.add(TextSpan(
+          text: text.substring(start, index),
+          style: const TextStyle(
+            fontSize: 14,
+            height: 1.5,
+            color: AppTheme.gray700,
           ),
-        ],
+        ));
+      }
+
+      // 添加高亮匹配的文本
+      spans.add(TextSpan(
+        text: text.substring(index, index + searchQuery.length),
+        style: const TextStyle(
+          fontSize: 14,
+          height: 1.5,
+          color: AppTheme.gray700,
+          backgroundColor: Color(0xFFFFEB3B),
+          fontWeight: FontWeight.w600,
+        ),
+      ));
+
+      start = index + searchQuery.length;
+    }
+
+    return RichText(
+      text: TextSpan(children: spans),
+    );
+  }
+
+  String _formatTime(Duration duration) {
+    final minutes = duration.inMinutes;
+    final seconds = duration.inSeconds % 60;
+    return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+  }
+}
+
+/// 工具栏按钮
+class _ToolbarButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  const _ToolbarButton({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: AppTheme.gray50,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: AppTheme.gray200),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, size: 16, color: AppTheme.gray600),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: const TextStyle(
+                fontSize: 13,
+                color: AppTheme.gray600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 摘要视图
+class _SummaryView extends StatelessWidget {
+  final Task task;
+
+  const _SummaryView({required this.task});
+
+  @override
+  Widget build(BuildContext context) {
+    final summary = task.summary;
+
+    if (summary == null) {
+      return const _EmptyState(
+        icon: Icons.summarize_outlined,
+        title: '暂无摘要',
+        subtitle: '摘要生成后将在此显示',
+      );
+    }
+
+    return Column(
+      children: [
+        // 工具栏
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            border: Border(bottom: BorderSide(color: AppTheme.gray200)),
+          ),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: AppTheme.primary50,
+                  borderRadius: BorderRadius.circular(AppRadius.md),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.auto_awesome, size: 14, color: AppTheme.primary600),
+                    const SizedBox(width: 6),
+                    Text(
+                      'AI 生成',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.primary600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        // 动态渲染内容
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: DynamicSummaryView(
+              data: summary.rawData,
+            ),
+          ),
+        ),
       ],
     );
   }
+}
 
-  Widget _buildSectionTitle(String title) {
-    return Text(
-      title,
-      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: Color(0xFF94A3B8)),
+/// 分析视图
+class _AnalysisView extends StatelessWidget {
+  final Task task;
+
+  const _AnalysisView({required this.task});
+
+  @override
+  Widget build(BuildContext context) {
+    final analysis = task.conversationAnalysis;
+
+    if (analysis == null) {
+      return _EmptyState(
+        icon: Icons.psychology_outlined,
+        title: '暂无对话分析',
+        subtitle: task.enableConversationAnalysis
+            ? '分析完成后将在此显示'
+            : '请在创建任务时开启对话分析',
+      );
+    }
+
+    return Column(
+      children: [
+        // 工具栏
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            border: Border(bottom: BorderSide(color: AppTheme.gray200)),
+          ),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: AppTheme.primary50,
+                  borderRadius: BorderRadius.circular(AppRadius.md),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.auto_awesome, size: 14, color: AppTheme.primary600),
+                    const SizedBox(width: 6),
+                    Text(
+                      'AI 分析',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.primary600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        // 动态渲染内容
+        Expanded(
+          child: DynamicConversationAnalysisView(
+            data: analysis.rawData,
+          ),
+        ),
+      ],
     );
   }
+}
 
-  Widget _buildInfoCard(List<Widget> children) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
-      ),
+/// 音频视图
+class _AudioView extends StatelessWidget {
+  final Task task;
+  final AudioPlayer player;
+
+  const _AudioView({required this.task, required this.player});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: children,
-      ),
-    );
-  }
-
-  Widget _buildInfoRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            '$label: ',
-            style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8)),
-          ),
-          Expanded(
-            child: Text(
-              value,
-              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF475569)),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildEmotionBadge(String label, String emotion) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: _getEmotionColor(emotion).withOpacity(0.1),
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: _getEmotionColor(emotion).withOpacity(0.3)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            label,
-            style: const TextStyle(fontSize: 9, color: Color(0xFF64748B)),
-          ),
-          const SizedBox(width: 4),
-          Text(
-            emotion,
-            style: TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.w700,
-              color: _getEmotionColor(emotion),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildEmotionNode(EmotionNode node) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Container(
-            width: 6,
-            height: 6,
-            margin: const EdgeInsets.only(top: 5),
+            width: 120,
+            height: 120,
             decoration: BoxDecoration(
-              color: _getEmotionColor(node.customerEmotion),
+              color: AppTheme.primary600.withOpacity(0.1),
               shape: BoxShape.circle,
             ),
+            child: Icon(
+              Icons.music_note,
+              size: 60,
+              color: AppTheme.primary600,
+            ),
           ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  node.trigger,
-                  style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: Color(0xFF475569)),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  '客户: ${node.customerEmotion} · 客服: ${node.agentResponse}',
-                  style: TextStyle(fontSize: 9, color: const Color(0xFF64748B).withOpacity(0.8)),
-                ),
-              ],
+          const SizedBox(height: 24),
+          Text(
+            task.fileName,
+            style: const TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '${task.audioFormat?.toUpperCase() ?? '未知'} · ${task.duration != null ? '${task.duration! ~/ 60}:${(task.duration! % 60).toString().padLeft(2, '0')}' : '--:--'}',
+            style: const TextStyle(
+              fontSize: 14,
+              color: AppTheme.gray500,
             ),
           ),
         ],
       ),
     );
   }
+}
 
-  Widget _buildQualityScore(String label, int score) {
-    final color = score >= 80
-        ? const Color(0xFF10B981)
-        : score >= 60
-            ? const Color(0xFFF59E0B)
-            : const Color(0xFFEF4444);
+/// 分析类型徽章
+class _AnalysisTypeBadge extends StatelessWidget {
+  final String type;
+
+  const _AnalysisTypeBadge({required this.type});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = switch (type) {
+      '投诉' => AppTheme.error,
+      '售后' => AppTheme.warning,
+      '技术支持' => AppTheme.primary600,
+      '售前' => AppTheme.accent600,
+      _ => AppTheme.gray600,
+    };
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
         color: color.withOpacity(0.1),
         borderRadius: BorderRadius.circular(8),
@@ -1035,247 +1431,661 @@ class _ConversationAnalysisPanel extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
+          Icon(Icons.category, size: 16, color: color),
+          const SizedBox(width: 8),
           Text(
-            label,
-            style: const TextStyle(fontSize: 10, color: Color(0xFF64748B)),
+            '对话类型: $type',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: color,
+            ),
           ),
-          const SizedBox(width: 4),
+        ],
+      ),
+    );
+  }
+}
+
+/// 分析卡片
+class _AnalysisCard extends StatelessWidget {
+  final String title;
+  final List<Widget> children;
+
+  const _AnalysisCard({required this.title, required this.children});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.gray200),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
           Text(
-            '$score',
-            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: color),
+            title,
+            style: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: AppTheme.gray700,
+            ),
+          ),
+          const SizedBox(height: 12),
+          const Divider(height: 1),
+          const SizedBox(height: 12),
+          ...children,
+        ],
+      ),
+    );
+  }
+}
+
+/// 信息行
+class _InfoRow extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _InfoRow({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 80,
+            child: Text(
+              label,
+              style: const TextStyle(
+                fontSize: 13,
+                color: AppTheme.gray500,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value.isEmpty ? '-' : value,
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+                color: AppTheme.gray900,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 情绪时间线
+class _EmotionTimeline extends StatelessWidget {
+  final EmotionAnalysis analysis;
+
+  const _EmotionTimeline({required this.analysis});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        _EmotionNode(label: '初始', emotion: analysis.initialEmotion),
+        const Expanded(
+          child: Divider(indent: 8, endIndent: 8),
+        ),
+        _EmotionNode(label: '峰值', emotion: analysis.peakEmotion),
+        const Expanded(
+          child: Divider(indent: 8, endIndent: 8),
+        ),
+        _EmotionNode(label: '结束', emotion: analysis.finalEmotion),
+      ],
+    );
+  }
+}
+
+/// 情绪节点
+class _EmotionNode extends StatelessWidget {
+  final String label;
+  final String emotion;
+
+  const _EmotionNode({required this.label, required this.emotion});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = switch (emotion) {
+      '愤怒' || '失望' => AppTheme.error,
+      '焦虑' || '疑惑' => AppTheme.warning,
+      '平和' || '满意' => AppTheme.success,
+      '兴奋' => AppTheme.accent600,
+      _ => AppTheme.gray600,
+    };
+
+    return Column(
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+            fontSize: 11,
+            color: AppTheme.gray400,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+          decoration: BoxDecoration(
+            color: color.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(color: color.withOpacity(0.3)),
+          ),
+          child: Text(
+            emotion,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: color,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// 摘要卡片
+class _SummaryCard extends StatelessWidget {
+  final String title;
+  final String content;
+  final IconData icon;
+
+  const _SummaryCard({
+    required this.title,
+    required this.content,
+    required this.icon,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: AppTheme.info50,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.primary600.withOpacity(0.2)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 20, color: AppTheme.primary600),
+              const SizedBox(width: 8),
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.primary900,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text(
+            content,
+            style: const TextStyle(
+              fontSize: 14,
+              height: 1.6,
+              color: AppTheme.primary900,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 区块标题
+class _SectionTitle extends StatelessWidget {
+  final String title;
+  final IconData icon;
+
+  const _SectionTitle({required this.title, required this.icon});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(icon, size: 18, color: AppTheme.gray500),
+        const SizedBox(width: 8),
+        Text(
+          title,
+          style: const TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            color: AppTheme.gray700,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// 要点项目
+class _BulletPoint extends StatelessWidget {
+  final String text;
+
+  const _BulletPoint({required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 6,
+            height: 6,
+            margin: const EdgeInsets.only(top: 7),
+            decoration: const BoxDecoration(
+              color: AppTheme.primary500,
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              text,
+              style: const TextStyle(
+                fontSize: 14,
+                height: 1.5,
+                color: AppTheme.gray600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 关键词芯片
+class _KeywordChip extends StatelessWidget {
+  final String label;
+
+  const _KeywordChip({required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: AppTheme.gray200),
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(
+          fontSize: 13,
+          fontWeight: FontWeight.w500,
+          color: AppTheme.gray500,
+        ),
+      ),
+    );
+  }
+}
+
+/// 音频播放器栏
+class _AudioPlayerBar extends StatelessWidget {
+  final AudioPlayer player;
+  final bool isMinimized;
+  final VoidCallback onToggleMinimize;
+
+  const _AudioPlayerBar({
+    required this.player,
+    required this.isMinimized,
+    required this.onToggleMinimize,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (isMinimized) {
+      return Container(
+        height: 48,
+        margin: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: AppTheme.gray900,
+          borderRadius: BorderRadius.circular(AppRadius.xl),
+        ),
+        child: Row(
+          children: [
+            const SizedBox(width: 12),
+            _MiniPlayButton(player: player),
+            const SizedBox(width: 12),
+            Expanded(
+              child: StreamBuilder<Duration>(
+                stream: player.positionStream,
+                builder: (context, snapshot) {
+                  final position = snapshot.data ?? Duration.zero;
+                  final duration = player.duration ?? Duration.zero;
+                  return Text(
+                    '${_formatDuration(position)} / ${_formatDuration(duration)}',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Colors.white,
+                      fontFamily: 'JetBrains Mono',
+                    ),
+                  );
+                },
+              ),
+            ),
+            IconButton(
+              onPressed: onToggleMinimize,
+              icon: const Icon(Icons.expand_less, color: Colors.white, size: 20),
+            ),
+            const SizedBox(width: 8),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      margin: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(AppRadius.xl),
+        border: Border.all(color: AppTheme.gray200),
+        boxShadow: [AppShadows.lg],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              // 播放按钮
+              _PlayButton(player: player),
+              const SizedBox(width: 16),
+
+              // 进度条
+              Expanded(
+                child: StreamBuilder<Duration>(
+                  stream: player.positionStream,
+                  builder: (context, snapshot) {
+                    final position = snapshot.data ?? Duration.zero;
+                    final duration = player.duration ?? Duration.zero;
+                    final progress = duration.inMilliseconds == 0
+                        ? 0.0
+                        : position.inMilliseconds / duration.inMilliseconds;
+
+                    return Column(
+                      children: [
+                        // 进度条
+                        GestureDetector(
+                          onTapDown: (details) {
+                            final box = context.findRenderObject() as RenderBox?;
+                            if (box == null) return;
+                            final local = box.globalToLocal(details.globalPosition);
+                            final width = box.size.width;
+                            final ratio = (local.dx / width).clamp(0.0, 1.0);
+                            final newPos = duration * ratio;
+                            player.seek(newPos);
+                          },
+                          child: Container(
+                            height: 4,
+                            decoration: BoxDecoration(
+                              color: AppTheme.gray200,
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                            child: FractionallySizedBox(
+                              alignment: Alignment.centerLeft,
+                              widthFactor: progress.isNaN ? 0 : progress,
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: AppTheme.primary600,
+                                  borderRadius: BorderRadius.circular(2),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+
+                        // 时间显示
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              _formatDuration(position),
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: AppTheme.gray500,
+                                fontFamily: 'JetBrains Mono',
+                              ),
+                            ),
+                            Text(
+                              _formatDuration(duration),
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: AppTheme.gray500,
+                                fontFamily: 'JetBrains Mono',
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    );
+                  },
+                ),
+              ),
+
+              const SizedBox(width: 16),
+
+              // 最小化按钮
+              IconButton(
+                onPressed: onToggleMinimize,
+                icon: Icon(Icons.expand_more, color: AppTheme.gray500, size: 20),
+              ),
+            ],
           ),
         ],
       ),
     );
   }
 
-  Color _getEmotionColor(String emotion) {
-    switch (emotion) {
-      case '愤怒':
-      case '失望':
-        return const Color(0xFFEF4444);
-      case '焦虑':
-      case '疑惑':
-        return const Color(0xFFF59E0B);
-      case '平和':
-      case '满意':
-        return const Color(0xFF10B981);
-      case '兴奋':
-        return const Color(0xFF8B5CF6);
-      default:
-        return const Color(0xFF64748B);
-    }
-  }
-
-  Color _getTypeColor(String type) {
-    switch (type) {
-      case '投诉':
-        return const Color(0xFFDC2626);
-      case '售后':
-        return const Color(0xFFEA580C);
-      case '技术支持':
-        return const Color(0xFF2563EB);
-      case '售前':
-        return const Color(0xFF7C3AED);
-      case '账单疑问':
-        return const Color(0xFF059669);
-      default:
-        return const Color(0xFF64748B);
-    }
-  }
-
-  Color _hexToColor(String hex) {
-    final hexCode = hex.replaceAll('#', '');
-    return Color(int.parse('FF$hexCode', radix: 16));
+  String _formatDuration(Duration duration) {
+    final minutes = duration.inMinutes;
+    final seconds = duration.inSeconds % 60;
+    return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
   }
 }
 
-class _AudioPlayerBar extends StatelessWidget {
+/// 播放按钮
+class _PlayButton extends StatelessWidget {
   final AudioPlayer player;
-  const _AudioPlayerBar({required this.player});
+
+  const _PlayButton({required this.player});
 
   @override
   Widget build(BuildContext context) {
-    return Align(
-      alignment: Alignment.bottomCenter,
-      child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 32),
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.95),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: const Color(0xFFE2E8F0)),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.12),
-              blurRadius: 24,
-              offset: const Offset(0, 16),
-            ),
-          ],
-        ),
-        child: StreamBuilder<Duration>(
-          stream: player.positionStream,
-          builder: (context, snapshot) {
-            final position = snapshot.data ?? Duration.zero;
-            final duration = player.duration ?? Duration.zero;
-            final progress = duration.inMilliseconds == 0
-                ? 0.0
-                : position.inMilliseconds / duration.inMilliseconds;
-            return Row(
-              children: [
-                Row(
-                  children: [
-                    _ControlIcon(icon: Icons.skip_previous, onTap: () {}),
-                    const SizedBox(width: 6),
-                    InkWell(
-                      onTap: () async {
-                        if (player.playing) {
-                          await player.pause();
-                        } else {
-                          await player.play();
-                        }
-                      },
-                      child: Container(
-                        width: 44,
-                        height: 44,
-                        decoration: const BoxDecoration(
-                          color: Color(0xFF256AF4),
-                          shape: BoxShape.circle,
-                        ),
-                        child: Icon(player.playing ? Icons.pause : Icons.play_arrow, color: Colors.white),
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    _ControlIcon(icon: Icons.skip_next, onTap: () {}),
-                  ],
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(_formatDuration(position), style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: Color(0xFF94A3B8), fontFamily: 'monospace')),
-                          const Text('当前：Speaker', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: Color(0xFF256AF4), letterSpacing: 1.2)),
-                          Text(_formatDuration(duration), style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: Color(0xFF94A3B8), fontFamily: 'monospace')),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-                      GestureDetector(
-                        onTapDown: (details) {
-                          final box = context.findRenderObject() as RenderBox?;
-                          if (box == null) return;
-                          final local = box.globalToLocal(details.globalPosition);
-                          final width = box.size.width;
-                          final ratio = (local.dx / width).clamp(0.0, 1.0);
-                          final newPos = duration * ratio;
-                          player.seek(newPos);
-                        },
-                        child: Container(
-                          height: 6,
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFF1F5F9),
-                            borderRadius: BorderRadius.circular(999),
-                          ),
-                          child: FractionallySizedBox(
-                            alignment: Alignment.centerLeft,
-                            widthFactor: progress.isNaN ? 0 : progress,
-                            child: Container(
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF256AF4),
-                                borderRadius: BorderRadius.circular(999),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Row(
-                  children: const [
-                    _SpeedPill(label: '0.5x'),
-                    SizedBox(width: 6),
-                    _SpeedPill(label: '1.0x', active: true),
-                    SizedBox(width: 6),
-                    _SpeedPill(label: '1.5x'),
-                  ],
-                ),
-                const SizedBox(width: 16),
-                _ControlIcon(icon: Icons.volume_up, onTap: () {}),
-                const SizedBox(width: 6),
-                _ControlIcon(icon: Icons.bookmarks, onTap: () {}),
-              ],
-            );
+    return StreamBuilder<bool>(
+      stream: player.playingStream,
+      builder: (context, snapshot) {
+        final isPlaying = snapshot.data ?? false;
+
+        return InkWell(
+          onTap: () async {
+            if (isPlaying) {
+              await player.pause();
+            } else {
+              await player.play();
+            }
           },
-        ),
-      ),
-    );
-  }
-}
-
-class _ControlIcon extends StatelessWidget {
-  final IconData icon;
-  final VoidCallback onTap;
-  const _ControlIcon({required this.icon, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      child: Container(
-        width: 32,
-        height: 32,
-        decoration: BoxDecoration(
-          color: const Color(0xFFF8FAFC),
           borderRadius: BorderRadius.circular(10),
-        ),
-        child: Icon(icon, size: 18, color: const Color(0xFF94A3B8)),
-      ),
+          child: Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: AppTheme.primary600,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(
+              isPlaying ? Icons.pause : Icons.play_arrow,
+              color: Colors.white,
+            ),
+          ),
+        );
+      },
     );
   }
 }
 
-class _SpeedPill extends StatelessWidget {
-  final String label;
-  final bool active;
-  const _SpeedPill({required this.label, this.active = false});
+/// 迷你播放按钮
+class _MiniPlayButton extends StatelessWidget {
+  final AudioPlayer player;
+
+  const _MiniPlayButton({required this.player});
 
   @override
   Widget build(BuildContext context) {
+    return StreamBuilder<bool>(
+      stream: player.playingStream,
+      builder: (context, snapshot) {
+        final isPlaying = snapshot.data ?? false;
+
+        return InkWell(
+          onTap: () async {
+            if (isPlaying) {
+              await player.pause();
+            } else {
+              await player.play();
+            }
+          },
+          child: Icon(
+            isPlaying ? Icons.pause : Icons.play_arrow,
+            color: Colors.white,
+            size: 20,
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// 评分网格
+class _ScoreGrid extends StatelessWidget {
+  final List<_ScoreItem> scores;
+
+  const _ScoreGrid({required this.scores});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: scores.map((score) => Expanded(child: score)).toList(),
+    );
+  }
+}
+
+/// 评分项
+class _ScoreItem extends StatelessWidget {
+  final String label;
+  final int value;
+  final IconData icon;
+  final Color? color;
+  final String? displayValue;
+
+  const _ScoreItem({
+    required this.label,
+    required this.value,
+    required this.icon,
+    this.color,
+    this.displayValue,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scoreColor = color ?? _getDefaultColor(value);
+    final text = displayValue ?? value.toString();
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      margin: const EdgeInsets.symmetric(horizontal: 4),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: active ? Colors.white : const Color(0xFFF8FAFC),
+        color: scoreColor.withOpacity(0.08),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: active ? const Color(0xFF256AF4) : const Color(0xFFE2E8F0)),
+        border: Border.all(color: scoreColor.withOpacity(0.2)),
+      ),
+      child: Column(
+        children: [
+          Icon(icon, size: 20, color: scoreColor),
+          const SizedBox(height: 8),
+          Text(
+            text,
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              color: scoreColor,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 11,
+              color: AppTheme.gray500,
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Color _getDefaultColor(int score) {
+    if (score >= 8) return AppTheme.success;
+    if (score >= 6) return AppTheme.warning;
+    return AppTheme.error;
+  }
+}
+
+/// 优先级徽章
+class _PriorityBadge extends StatelessWidget {
+  final int score;
+
+  const _PriorityBadge({required this.score});
+
+  @override
+  Widget build(BuildContext context) {
+    final (label, color) = switch (score) {
+      >= 8 => ('紧急', AppTheme.error),
+      >= 6 => ('高', AppTheme.warning),
+      >= 4 => ('中', AppTheme.primary600),
+      _ => ('低', AppTheme.success),
+    };
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color.withOpacity(0.3)),
       ),
       child: Text(
         label,
         style: TextStyle(
-          fontSize: 10,
-          fontWeight: FontWeight.w800,
-          color: active ? const Color(0xFF256AF4) : const Color(0xFF94A3B8),
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          color: color,
         ),
       ),
     );
   }
-}
-
-String _formatDate(DateTime date) {
-  return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
-}
-
-String _formatDuration(Duration duration) {
-  final minutes = duration.inMinutes.remainder(60).toString().padLeft(2, '0');
-  final seconds = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
-  return '${duration.inHours.toString().padLeft(2, '0')}:$minutes:$seconds';
-}
-
-String _formatTime(double seconds) {
-  final d = Duration(seconds: seconds.floor());
-  return _formatDuration(d);
 }

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:uuid/uuid.dart';
 import '../models/task.dart';
 import '../models/channel.dart';
@@ -10,6 +11,14 @@ import 'conversation_analysis_service.dart';
 class TaskService {
   final _db = DatabaseService.instance;
   final _uuid = const Uuid();
+
+  // 并行执行控制
+  static const int _maxConcurrentTasks = 3;
+  final List<String> _runningTasks = [];
+  final List<Task> _pendingTaskQueue = [];
+  final _taskCompletionController = StreamController<String>.broadcast();
+
+  Stream<String> get taskCompletionStream => _taskCompletionController.stream;
 
   /// 创建任务
   Future<Task> createTask({
@@ -45,8 +54,95 @@ class TaskService {
       taskId: task.id,
       fields: {'file_name': fileName, 'provider': provider, 'model': model},
     );
+
+    // 添加到执行队列
+    _queueTask(task);
+
     return task;
   }
+
+  /// 将任务添加到执行队列
+  void _queueTask(Task task) {
+    _pendingTaskQueue.add(task);
+    _processQueue();
+  }
+
+  /// 处理任务队列，控制并行数量
+  void _processQueue() {
+    while (_runningTasks.length < _maxConcurrentTasks && _pendingTaskQueue.isNotEmpty) {
+      final task = _pendingTaskQueue.removeAt(0);
+      _runningTasks.add(task.id);
+      _executeTaskInternal(task);
+    }
+  }
+
+  /// 任务执行完成后处理
+  void _onTaskCompleted(String taskId) {
+    _runningTasks.remove(taskId);
+    _taskCompletionController.add(taskId);
+    // 继续处理队列中的下一个任务
+    _processQueue();
+  }
+
+  /// 内部执行任务方法
+  Future<void> _executeTaskInternal(Task task) async {
+    try {
+      await _executeTaskWithWorkflow(task);
+    } finally {
+      _onTaskCompleted(task.id);
+    }
+  }
+
+  /// 执行任务（完整流程）
+  Future<void> _executeTaskWithWorkflow(Task task) async {
+    try {
+      await _createWorkflowStep(task, '准备', WorkflowStatus.running);
+      // 1. 更新状态为处理中
+      await updateTaskStatus(task.id, TaskStatus.processing);
+      await LoggerService.instance
+          .info('Task execution started', taskId: task.id);
+
+      // 2. 语音识别
+      await _createWorkflowStep(task, '语音识别', WorkflowStatus.running);
+      await _executeTranscription(task);
+      await _completeWorkflowStep(task, '语音识别');
+
+      // 3. 生成摘要（如果启用）
+      if (task.generateSummary) {
+        await _createWorkflowStep(task, '摘要生成', WorkflowStatus.running);
+        await _executeSummary(task);
+        await _completeWorkflowStep(task, '摘要生成');
+      }
+
+      // 4. 对话分析（如果启用）
+      if (task.enableConversationAnalysis) {
+        await _createWorkflowStep(task, '对话分析', WorkflowStatus.running);
+        await _executeConversationAnalysis(task);
+        await _completeWorkflowStep(task, '对话分析');
+      }
+
+      // 5. 完成
+      await updateTaskStatus(task.id, TaskStatus.completed);
+      await _completeWorkflowStep(task, '准备');
+      await LoggerService.instance
+          .info('Task execution completed', taskId: task.id);
+    } catch (e, st) {
+      await updateTaskStatus(task.id, TaskStatus.failed, error: e.toString());
+      await _failWorkflowStep(task, e.toString());
+      await LoggerService.instance.error(
+        'Task execution failed',
+        taskId: task.id,
+        error: e,
+        stackTrace: st,
+      );
+    }
+  }
+
+  /// 获取正在运行的任务数量
+  int get runningTaskCount => _runningTasks.length;
+
+  /// 获取队列中等待的任务数量
+  int get pendingTaskCount => _pendingTaskQueue.length;
 
   /// 获取任务列表
   Future<List<Task>> getTasks({
@@ -97,7 +193,7 @@ class TaskService {
     var retryTask = task;
     final downloadedModel = await _pickDownloadedModel(task.model);
     if (downloadedModel == null) {
-      throw Exception('当前无可用本地模型，请先到“模型与API”下载模型后再重试');
+      throw Exception('当前无可用本地模型，请先到”模型与API”下载模型后再重试');
     }
     if (downloadedModel != task.model) {
       retryTask = task.copyWith(model: downloadedModel);
@@ -115,7 +211,7 @@ class TaskService {
       throw Exception('任务重试失败，任务不存在');
     }
     await LoggerService.instance.info('Task retry', taskId: taskId);
-    await executeTask(reloaded);
+    _queueTask(reloaded);
   }
 
   Future<String?> _pickDownloadedModel(String preferredModel) async {
@@ -140,49 +236,10 @@ class TaskService {
     return null;
   }
 
-  /// 执行任务（完整流程）
+  /// 执行任务（完整流程）- 已弃用，请使用 createTask 自动触发
+  @Deprecated('Use createTask which automatically queues the task')
   Future<void> executeTask(Task task) async {
-    try {
-      await _createWorkflowStep(task, '准备', WorkflowStatus.running);
-      // 1. 更新状态为处理中
-      await updateTaskStatus(task.id, TaskStatus.processing);
-      await LoggerService.instance
-          .info('Task execution started', taskId: task.id);
-
-      // 2. 语音识别
-      await _createWorkflowStep(task, '语音识别', WorkflowStatus.running);
-      await _executeTranscription(task);
-      await _completeWorkflowStep(task, '语音识别');
-
-      // 3. 生成摘要（如果启用）
-      if (task.generateSummary) {
-        await _createWorkflowStep(task, '摘要生成', WorkflowStatus.running);
-        await _executeSummary(task);
-        await _completeWorkflowStep(task, '摘要生成');
-      }
-
-      // 4. 对话分析（如果启用）
-      if (task.enableConversationAnalysis) {
-        await _createWorkflowStep(task, '对话分析', WorkflowStatus.running);
-        await _executeConversationAnalysis(task);
-        await _completeWorkflowStep(task, '对话分析');
-      }
-
-      // 5. 完成
-      await updateTaskStatus(task.id, TaskStatus.completed);
-      await _completeWorkflowStep(task, '准备');
-      await LoggerService.instance
-          .info('Task execution completed', taskId: task.id);
-    } catch (e, st) {
-      await updateTaskStatus(task.id, TaskStatus.failed, error: e.toString());
-      await _failWorkflowStep(task, e.toString());
-      await LoggerService.instance.error(
-        'Task execution failed',
-        taskId: task.id,
-        error: e,
-        stackTrace: st,
-      );
-    }
+    _queueTask(task);
   }
 
   /// 执行语音识别
@@ -284,15 +341,10 @@ class TaskService {
       }
 
       // 保存摘要结果
-      final summary = SummaryResult(
-        id: _uuid.v4(),
-        taskId: task.id,
-        short: result['short'] ?? result['summary'],
-        medium: result['medium'] ?? result['summary'],
-        long: result['long'] ?? result['summary'],
-        keyPoints: List<String>.from(result['key_points'] ?? []),
-        keywords: List<String>.from(result['keywords'] ?? []),
-        createdAt: DateTime.now(),
+      final summary = SummaryResult.fromApiResponse(
+        _uuid.v4(),
+        task.id,
+        result,
       );
 
       await _db.insertSummary(summary);

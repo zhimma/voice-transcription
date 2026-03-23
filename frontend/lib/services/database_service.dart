@@ -25,9 +25,8 @@ class DatabaseService {
 
     return await openDatabase(
       dbPath,
-      version: 5,
+      version: 1,  // 版本1：全新数据库，动态渲染结构
       onCreate: _onCreate,
-      onUpgrade: _onUpgrade,
     );
   }
 
@@ -73,7 +72,7 @@ class DatabaseService {
       )
     ''');
 
-    // 摘要表
+    // 摘要表 - 版本7：使用 raw_data 存储完整JSON
     await db.execute('''
       CREATE TABLE summaries (
         id TEXT PRIMARY KEY,
@@ -83,6 +82,7 @@ class DatabaseService {
         long TEXT,
         key_points TEXT,
         keywords TEXT,
+        raw_data TEXT NOT NULL,
         created_at TEXT NOT NULL,
         FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
       )
@@ -144,76 +144,6 @@ class DatabaseService {
         'CREATE INDEX idx_prompt_history_type ON prompt_history(prompt_type)');
     await db.execute(
         'CREATE INDEX idx_prompt_history_active ON prompt_history(is_active)');
-  }
-
-  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
-    if (oldVersion < 2) {
-      try {
-        await db
-            .execute('ALTER TABLE workflow_steps ADD COLUMN created_at TEXT');
-        // Backfill from start_time if available, else now
-        await db.execute('''
-          UPDATE workflow_steps
-          SET created_at = COALESCE(start_time, datetime('now'))
-          WHERE created_at IS NULL
-        ''');
-      } catch (_) {
-        // Ignore if column already exists
-      }
-    }
-    if (oldVersion < 3) {
-      try {
-        await db.execute('ALTER TABLE tasks ADD COLUMN sample_rate INTEGER');
-      } catch (_) {}
-      try {
-        await db.execute('ALTER TABLE tasks ADD COLUMN provider TEXT');
-      } catch (_) {}
-    }
-    if (oldVersion < 4) {
-      try {
-        await db.execute(
-            'ALTER TABLE tasks ADD COLUMN enable_conversation_analysis INTEGER DEFAULT 0');
-      } catch (_) {}
-      try {
-        await db.execute('''
-          CREATE TABLE conversation_analyses (
-            id TEXT PRIMARY KEY,
-            task_id TEXT NOT NULL,
-            analysis_json TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
-          )
-        ''');
-      } catch (_) {}
-      try {
-        await db.execute(
-            'CREATE INDEX idx_conversation_analyses_task_id ON conversation_analyses(task_id)');
-      } catch (_) {}
-    }
-    if (oldVersion < 5) {
-      try {
-        await db.execute('''
-          CREATE TABLE prompt_history (
-            id TEXT PRIMARY KEY,
-            prompt_type TEXT NOT NULL,
-            content TEXT NOT NULL,
-            version INTEGER NOT NULL,
-            is_active INTEGER DEFAULT 0,
-            note TEXT,
-            created_at TEXT NOT NULL,
-            created_by TEXT
-          )
-        ''');
-      } catch (_) {}
-      try {
-        await db.execute(
-            'CREATE INDEX idx_prompt_history_type ON prompt_history(prompt_type)');
-      } catch (_) {}
-      try {
-        await db.execute(
-            'CREATE INDEX idx_prompt_history_active ON prompt_history(is_active)');
-      } catch (_) {}
-    }
   }
 
   // 任务 CRUD
@@ -505,6 +435,7 @@ class DatabaseService {
       'long': summary.long,
       'key_points': summary.keyPoints.join(','),
       'keywords': summary.keywords.join(','),
+      'raw_data': jsonEncode(summary.rawData),
       'created_at': summary.createdAt.toIso8601String(),
     };
   }
@@ -518,6 +449,9 @@ class DatabaseService {
       long: map['long'],
       keyPoints: map['key_points']?.toString().split(',') ?? [],
       keywords: map['keywords']?.toString().split(',') ?? [],
+      rawData: map['raw_data'] != null
+          ? jsonDecode(map['raw_data'] as String) as Map<String, dynamic>
+          : {},
       createdAt: DateTime.parse(map['created_at']),
     );
   }
